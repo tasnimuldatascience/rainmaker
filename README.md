@@ -2,8 +2,7 @@
 
 # Rainmaker
 
-**An AI sales agent platform with a rep console that works with the network off.**<br>
-Research agent · live closer · local-first CRDT sync
+**A sales tool that keeps working when the internet does not.**
 
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
@@ -17,86 +16,130 @@ Research agent · live closer · local-first CRDT sync
 
 </div>
 
-<br>
+---
 
-## The idea
+## What is this?
 
-An AI agent that runs live video sales calls is only as good as what it knows walking in, and a
-rep console is only useful if it works on a train. Rainmaker is three systems that have to
-cooperate:
+Three things a sales team needs, built to work together:
 
-<table>
-<tr><td width="150"><b>Research agent</b></td><td>Reads a prospect's public pages and returns <b>typed facts with sources</b> — pricing motion, stack, open roles, buying signals. Never prose, never an unsourced claim.</td></tr>
-<tr><td><b>Closer agent</b></td><td>Runs the call with an animated face: discloses it is AI before anything else, grounds every claim in what research actually read, hands off the instant someone asks for a human. Measured 800ms turn budget.</td></tr>
-<tr><td><b>Rep console</b></td><td><b>Local-first.</b> Every edit lands on the device instantly and syncs when it can. Hand-rolled CRDT, IndexedDB, service worker, offline outbox.</td></tr>
-</table>
+| Part | What it does |
+|---|---|
+| **Research** | Reads a company's public website and pulls out useful facts — how they price, what they use, who they are hiring |
+| **AI caller** | An animated agent that runs a video sales call, says it is AI up front, and hands over to a person when asked |
+| **Sales dashboard** | Where reps track their deals — **and it works with no internet at all** |
 
-<br>
+---
 
-## It genuinely works offline
+## The offline part is real
 
-Not "shows a cached page" offline. **Reload the tab with the connection severed and the whole
-pipeline comes back**, edits still land, and the queue drains on reconnect.
+Not "shows you a cached page". **Turn off your wifi, reload the browser tab, and everything
+still works.** Your edits save. When the connection returns, they sync.
 
 <div align="center">
 <img src="docs/img/offline.png" alt="Rainmaker running with the network disconnected" width="100%">
 <br>
-<sub>Captured by <a href="scripts/screenshots.mjs">the screenshot script</a> against a genuinely
-severed connection — <code>setOffline(true)</code>, then a hard reload. The badge shows 83 edits
-saved locally and waiting.</sub>
+<sub>Taken with the network genuinely disconnected, then a full page reload. The badge shows
+<b>83 edits saved on the device</b>, waiting to sync.</sub>
 </div>
 
-That screenshot is the reason the service worker exists: the first version of this script
-failed with `ERR_INTERNET_DISCONNECTED`, which proved the app could not survive a cold reload.
-All the CRDT machinery in the world is worthless if the tab refuses to start.
+Why this is hard: the first version of that screenshot script failed with
+`ERR_INTERNET_DISCONNECTED`. The app could not even start after a reload. All the clever syncing
+in the world is useless if the page refuses to open.
 
-<br>
+**Try it yourself:** run it, drag a deal card between columns, turn off your wifi, keep working.
+There is no spinner and no "failed to save" message, because there is no request that can fail.
 
-## The interesting engineering
+---
 
-### A CRDT with no server-side merge
+## Run it
 
-`packages/crdt` is a hand-rolled op-based CRDT — hybrid logical clocks, LWW registers,
-observed-remove tag sets, and an RGA text sequence for collaborative notes. The server never
-merges anything; it appends, orders, and relays. That is what lets the console keep working
-when the server is unreachable, and what keeps the server small enough to be obviously correct.
+```bash
+git clone https://github.com/tasnimuldatascience/rainmaker && cd rainmaker
+npm install
+pip install -e "services/api[dev]"
 
-**Convergence is tested as a property, not with examples.** 300 randomised histories are
-replayed into two replicas in different orders and asserted identical:
+# terminal 1 — the backend
+uvicorn rainmaker.app:app --app-dir services/api/src --port 8000
 
-```ts
-// For any set of ops S and any permutations p, q of S:
-//   apply(p) on replica A  ==  apply(q) on replica B
+# terminal 2 — the dashboard
+npm run dev            # http://localhost:5173
 ```
 
-That found two bugs inspection had missed — both the same class, and both invisible without it:
-**a cancelling operation that arrives before the operation it cancels was being silently
-dropped.** A character delete beating its insert made the character come back on one replica
-only. The shrunk counterexample was two operations long.
+Then **turn off your wifi and keep working.** That is the demo.
 
-### Two implementations, one guard
+Optional, and both work without them:
 
-The console merges in TypeScript; the API materialises the same log in Python. Two
-implementations of one merge rule *will* drift, and when they drift the API and the UI disagree
-about a customer's pipeline — silently, because neither errors.
+```bash
+FIRECRAWL_API_KEY=fc-…     # use the real research API instead of the built-in browser
+OUR_CATEGORY="vector search,learning-to-rank"   # rank job posts mentioning these highest
+```
 
-So [`packages/crdt/scripts/fixtures.ts`](packages/crdt/scripts/fixtures.ts) runs seven scenarios
-through the **real** TypeScript replica and records what it decided; the Python suite asserts
-its reducer agrees. Generated, never hand-written — a hand-written expectation encodes what the
-author *believed* both sides do, which is the assumption under test. The concurrent-tiebreak
-cases matter most: the answer is arbitrary, and both sides must pick the *same* arbitrary answer.
+---
 
-### A research agent that cannot make things up
+## How the offline part works
+
+Normally, saving something means asking a server and waiting. If the server cannot be reached,
+you get an error and your work is stuck.
+
+Rainmaker never asks. Every edit is saved on your device immediately, and the change is queued to
+send later. The server's only job is to collect changes and pass them on — **it never decides who
+wins.**
+
+That raises an obvious problem: what if two people edit the same deal while both are offline?
+
+The answer is a **CRDT** — a way of storing data where changes can arrive in any order, or twice,
+or years late, and everyone still ends up with the same result.
+
+### Testing it properly
+
+You cannot test this with a handful of examples, because the bugs live in orderings nobody thinks
+to write down.
+
+So the tests generate **300 random sequences of edits**, deliver them to two devices in different
+orders, and check both end up identical:
+
+```
+For any set of edits, delivered in any two orders:
+    device A's result  ==  device B's result
+```
+
+That found two bugs that reading the code had missed. Both were the same shape:
+
+> **A deletion arriving before the thing it deletes.** Delete a character, and if that deletion
+> reaches the other device before the original typing does, the character comes back — on one
+> device only.
+
+The failing case the test found was two operations long. Nobody would have written that test
+by hand.
+
+### Two versions of the same rules
+
+The dashboard merges changes in TypeScript. The backend does the same in Python.
+
+Two implementations of the same rule **will** drift apart eventually, and when they do, the
+dashboard and the backend quietly disagree about a customer's deal. Nothing errors. Nobody
+notices.
+
+So the TypeScript version runs seven scenarios and records what it decided. The Python tests then
+check they agree. These recordings are **generated by running the real code**, never written by
+hand — a hand-written expectation only records what the author *believed* both sides do, which is
+exactly the thing being tested.
+
+---
+
+## Research that cannot make things up
 
 <img src="docs/img/research.png" alt="Research panel with provenance badges" width="100%">
 
-Every fact carries how it was obtained:
+Every fact comes with a label saying where it came from:
 
-| tier | meaning |
+| Label | Meaning |
 |---|---|
-| `OBSERVED` | appears verbatim on a page we fetched. Citable. |
-| `DERIVED` | computed from observed values by a documented rule. Reproducible without a model. |
-| `INFERRED` | a model's reading — and **structurally required** to carry the excerpt it was drawn from |
+| **Seen** | These exact words appear on a page we read. You can quote it |
+| **Worked out** | Calculated from things we saw, by a written-down rule. No AI involved |
+| **AI guess** | An AI's interpretation — **and it must show the text it was reading** |
+
+That last rule is enforced by the code, not by convention:
 
 ```python
 Sourced[str](value="fintech", provenance=Provenance.INFERRED)
@@ -104,35 +147,41 @@ Sourced[str](value="fintech", provenance=Provenance.INFERRED)
 #             an unsourced inference is a guess wearing a schema
 ```
 
-This is deliberately **not** "an LLM with a browser tool". A fixed plan over high-yield paths, a
-hard page budget, deterministic extraction. The model only adds labelled `INFERRED` fields on
-top of a complete `OBSERVED` base and can never overwrite one. The same domain twice produces
-byte-identical output.
+**This is deliberately not "an AI with a web browser."** It follows a fixed list of pages, has a
+hard limit on how many it will read, and pulls out facts using ordinary code. The AI only adds
+clearly-labelled guesses on top, and **can never overwrite something that was actually seen.**
 
-**Scope discipline**, enforced in code rather than documented: public pages only, no credentials
-ever, robots.txt obeyed including crawl-delay, per-host serialisation, hard page cap applied to
-*requests* rather than successes.
+Run it twice on the same company and you get byte-for-byte identical results.
 
-### The latency budget is the product
+**It also stays in bounds**, enforced in code: public pages only, never any login, obeys
+`robots.txt` including the requested delay between requests, one request at a time per website,
+and the page limit counts *attempts* rather than successes.
+
+---
+
+## The AI caller
 
 <img src="docs/img/call.png" alt="Live call view with per-stage latency budget" width="100%">
 
-Human turn-taking tolerates ~300ms; past ~800ms a pause stops reading as thinking and starts
-reading as broken. Every stage streams into the next:
+In conversation, people tolerate about 300 milliseconds of silence. Past about 800, a pause stops
+sounding like thinking and starts sounding broken.
 
-| stage | naive | streamed | budget |
+Getting under that means every stage starts working on the **first piece** of the previous
+stage's output instead of waiting for all of it:
+
+| Stage | If you wait | If you stream | Budget |
 |---|---:|---:|---:|
-| VAD / endpoint | 250ms | 250ms | 250ms |
-| STT final | 400ms | 60ms | 80ms |
-| LLM first token | 700ms | 220ms | 250ms |
-| TTS first audio | 350ms | 70ms | 100ms |
-| lip-sync | 120ms | 30ms | 40ms |
-| **total** | **~1820ms** | **~630ms** | **720ms** |
+| Noticing they stopped talking | 250ms | 250ms | 250ms |
+| Converting speech to text | 400ms | 60ms | 80ms |
+| AI's first word | 700ms | 220ms | 250ms |
+| First audio out | 350ms | 70ms | 100ms |
+| Moving the mouth | 120ms | 30ms | 40ms |
+| **Total** | **~1820ms** | **~630ms** | **720ms** |
 
-Starting TTS at the first *clause* rather than the first sentence is worth ~200ms — a quarter of
-the entire budget.
+Starting the voice on the first **clause** rather than waiting for a full sentence saves about
+200ms — a quarter of the whole budget.
 
-### Disclosure is structural, not a setting
+### It always says it is an AI
 
 ```python
 Disclosure(required=False)
@@ -140,75 +189,50 @@ Disclosure(required=False)
 #                  to, that is a legal question, not a configuration one.
 ```
 
-A synthetic face on a sales call that does not say it is synthetic is the failure mode that ends
-the company. Making it impossible to disable is cheaper than making it a setting somebody
-eventually turns off.
+An AI face on a sales call that does not admit it is an AI is the mistake that ends a company.
+Making it impossible to switch off is cheaper than making it a setting somebody eventually
+switches off.
 
-<br>
+---
 
-## Avatar stack
+## The animated face
 
-Fully open-source, self-hostable, with commercial adapters behind the same interface:
+Everything is open source and can be self-hosted. Paid alternatives plug into the same interface.
 
-| layer | choice | why |
+| Part | Using | Why |
 |---|---|---|
-| lip-sync | **MuseTalk** (~30fps, consumer GPU) | the only open-source lip-sync that is genuinely realtime |
-| idle motion | **LivePortrait** | avoids the frozen-mannequin tell while listening |
-| TTS | **Kokoro-82M** (Apache-2.0) | latency dominates perceived realism; best free latency/quality point |
-| STT | **faster-whisper** streaming | realtime on GPU, no API cost |
-| turn-taking | **Silero VAD** + semantic endpointing | interrupting badly reads as fake instantly |
-| transport | **LiveKit** (Apache-2.0) | SFU, reconnection, adaptive bitrate |
+| Mouth movement | **MuseTalk** | The only open-source option fast enough for live video |
+| Idle movement | **LivePortrait** | Stops it looking like a frozen mannequin while listening |
+| Voice | **Kokoro-82M** | Speed matters more than perfection here, and it is free |
+| Hearing | **faster-whisper** | Runs live on a GPU, costs nothing per call |
+| Knowing when you stopped | **Silero** + sentence checking | Interrupting badly makes it obviously fake |
+| Video connection | **LiveKit** | Handles reconnects and bad networks |
 
-**The shipped face is a vector viseme rig** ([`Avatar.tsx`](apps/console/src/components/Avatar.tsx)) —
-deliberately the same pipeline a neural renderer uses:
+**What actually ships is a drawn face**, not a photo-realistic one. It uses the same pipeline a
+photo-realistic system would:
 
 ```
-audio / text ──► viseme sequence ──► mouth shape ──► frame
+audio ──► which mouth shape ──► draw the frame
 ```
 
-Only the last stage differs: vector paths instead of diffused pixels. Everything upstream — the
-phoneme→viseme mapping, timing, co-articulation, idle behaviour — is what a realtime avatar
-actually needs, and it is the part that decides whether a face reads as alive. What sells it is
-not the mouth: irregular blinking (periodic blinking is instantly robotic), continuous
-micro-sway, eye saccades that re-fix on the camera, brow lift on stressed syllables, and a
-listening pose with slowed blinking so she never freezes between utterances.
+Only the last step differs — drawn shapes instead of AI-generated pixels. Everything before it
+is the real thing, and it is the part that decides whether a face looks alive.
+
+What sells it is not the mouth. It is **irregular blinking** (a steady blink is instantly
+robotic), constant small movement, eyes that drift and return to the camera, eyebrows lifting on
+emphasised words, and a listening pose with slower blinking so she never freezes between
+sentences.
 
 > [!IMPORTANT]
-> **What is verified and what is not.** The orchestration, budget accounting, disclosure
-> enforcement, CRDT, sync, research agent, console, and the vector avatar are implemented and
-> running — the screenshot above is the live rig captured mid-utterance. The **photoreal**
-> option (MuseTalk over a LivePortrait idle loop) sits behind the same provider interface but
-> has **not been run end to end here**: it needs several GB of weights and a persistent GPU
-> service. Claiming a tested photoreal avatar would fall apart in the first interview question.
+> **What is tested and what is not.** The call handling, timing, disclosure, offline syncing,
+> research, dashboard and the drawn face are all built and running — that screenshot is the live
+> system mid-sentence. The **photo-realistic** option is wired up behind the same interface but
+> **has not been run end to end here**: it needs several gigabytes of model weights and a
+> dedicated GPU. Claiming otherwise would fall apart in the first interview question.
 
-<br>
+---
 
-## Quickstart
-
-```bash
-git clone https://github.com/tasnimuldatascience/rainmaker && cd rainmaker
-npm install
-pip install -e "services/api[dev]"
-
-# terminal 1 — API
-uvicorn rainmaker.app:app --app-dir services/api/src --port 8000
-
-# terminal 2 — console
-npm run dev            # http://localhost:5173
-```
-
-Then **turn off your wifi and keep working.** That is the demo.
-
-Optional, both with working fallbacks:
-
-```bash
-FIRECRAWL_API_KEY=fc-…     # research hits the real API instead of self-hosted Playwright
-OUR_CATEGORY="vector search,learning-to-rank"   # job posts mentioning these score highest
-```
-
-<br>
-
-## The console
+## The dashboard
 
 <table>
 <tr>
@@ -216,48 +240,45 @@ OUR_CATEGORY="vector search,learning-to-rank"   # job posts mentioning these sco
 <td width="50%"><img src="docs/img/deal-drawer.png" alt="Deal detail with collaborative notes"></td>
 </tr>
 <tr>
-<td align="center"><sub>Light theme — a real theme, not an inversion</sub></td>
-<td align="center"><sub>Notes merge character by character. No save button, because there is nothing to save.</sub></td>
+<td align="center"><sub>Light theme — properly designed, not just inverted</sub></td>
+<td align="center"><sub>Notes merge letter by letter. No save button, because there is nothing to save</sub></td>
 </tr>
 </table>
 
-Drag a card between stages with the network off; it lands instantly. There is no optimistic-
-update bookkeeping and no rollback path, because there is no request that can fail.
-
-<br>
+---
 
 ## Tests
 
 ```bash
-npm test                       # 19 — CRDT, incl. 300 randomised convergence runs
-pytest services/api            # 59 — research, op log, relay, cross-implementation agreement
+npm test                       # 19 tests — including 300 random sync scenarios
+pytest                         # 59 tests — research, syncing, cross-language agreement
 ```
 
-| suite | what it protects |
+| Test file | What it protects |
 |---|---|
-| `convergence.test.ts` | strong eventual consistency under random delivery orders |
-| `test_research.py` | the agent cannot fabricate, wander off-domain, or exceed its budget |
-| `test_sync.py` | dedup, durability-before-broadcast, backpressure, TS↔Python agreement |
+| `convergence.test.ts` | Everyone ends up with the same data, whatever order changes arrive in |
+| `test_research.py` | The research agent cannot invent facts, wander onto other websites, or read more pages than allowed |
+| `test_sync.py` | Duplicate changes, saving before broadcasting, slow clients, and TypeScript ↔ Python agreement |
 
-<br>
+---
 
-## Architecture
+## Project layout
 
 ```
-packages/crdt          hybrid logical clocks · LWW · OR-Set · RGA text   (TypeScript)
-apps/console           React 18 · IndexedDB · service worker · outbox
+packages/crdt          the offline-syncing data structures     (TypeScript)
+apps/console           the dashboard                            (React)
 services/api
-  research/            fetch → extract → typed facts with provenance
-  sync/                op log (SQLite WAL) + backpressured relay
-  calls/               turn loop, latency budget, disclosure
-  crm/                 read-only materialisation
+  research/            reading websites and extracting facts
+  sync/                collecting and relaying changes
+  calls/               the call loop, timing, and disclosure
+  crm/                 turning changes into a readable view
 ```
 
-Nothing above `sync/` knows how an op arrived; nothing above `research/extract` knows how a page
-was fetched. See [ARCHITECTURE.md](ARCHITECTURE.md) for the decisions and what was rejected.
+Nothing above `sync/` knows how a change arrived. Nothing above `research/extract` knows how a
+page was fetched. See [ARCHITECTURE.md](ARCHITECTURE.md) for the decisions and what was rejected.
 
-<br>
+---
 
-## License
+## Licence
 
-MIT. Not affiliated with River. Built as an original system exploring the same problem space.
+MIT. Not affiliated with River. An original system exploring the same problem.
