@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  crdt:
+    name: CRDT (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm }
+      - run: npm ci
+      - run: npx tsc --noEmit -p packages/crdt/tsconfig.json
+      - run: npx tsc --noEmit -p apps/console/tsconfig.json
+      - run: npx vitest run --root packages/crdt
+      - run: npm run build -w @rainmaker/console
+
+  api:
+    name: API (Python)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}", cache: pip }
+      - run: pip install -e "services/api[dev]"
+      - run: ruff check services/api
+      - run: pytest services/api -q
+
+  agreement:
+    # The guard that matters: regenerate the fixtures from the REAL TypeScript replica, then
+    # assert the Python reducer still agrees. Running this in CI is what catches a merge-rule
+    # change on one side that nobody propagated to the other.
+    name: TS ↔ Python merge agreement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: npm ci
+      - run: pip install -e "services/api[dev]"
+      - run: npx tsx packages/crdt/scripts/fixtures.ts
+      - name: Fixtures must be committed and current
+        run: git diff --exit-code services/api/tests/fixtures
+      - run: pytest services/api -q -k Agrees

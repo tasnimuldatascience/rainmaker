@@ -3,6 +3,8 @@ dist/
 build/
 .vite/
 *.tsbuildinfo
+playwright-report/
+test-results/
 
 __pycache__/
 *.py[cod]
@@ -13,11 +15,12 @@ venv/
 .ruff_cache/
 .coverage
 
-# Build artifacts and local state
+# Runtime state. The op log and research cache are rebuilt by running the system.
 data/
 *.db
 *.sqlite3
-.cache/
+*.sqlite3-wal
+*.sqlite3-shm
 
 .env
 .env.local

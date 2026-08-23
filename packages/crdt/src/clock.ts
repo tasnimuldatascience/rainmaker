@@ -121,10 +121,13 @@ export function encode(t: HLC): string {
 }
 
 export function decode(s: string): HLC {
-  const [wall, counter, ...rest] = s.split(":");
+  // An actor id may itself contain ":", so the split is bounded to the two fixed-width
+  // fields and everything after is the actor. `?? ""` keeps this total under
+  // noUncheckedIndexedAccess rather than asserting non-null on parser output.
+  const parts = s.split(":");
   return {
-    wall: parseInt(wall, 16),
-    counter: parseInt(counter, 16),
-    actor: rest.join(":"),
+    wall: parseInt(parts[0] ?? "0", 16),
+    counter: parseInt(parts[1] ?? "0", 16),
+    actor: parts.slice(2).join(":"),
   };
 }

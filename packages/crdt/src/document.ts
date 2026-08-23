@@ -348,6 +348,7 @@ function walk(state: TextState, includeDeleted: boolean): TextChar[] {
 
   while (pending.length) {
     const frame = pending[pending.length - 1];
+    if (!frame) break;
     const next = frame.shift();
     if (!next) {
       pending.pop();
