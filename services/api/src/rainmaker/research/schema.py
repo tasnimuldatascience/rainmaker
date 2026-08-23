@@ -21,9 +21,9 @@ inference was drawn from. An unsourced inference is indistinguishable from a gue
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal, TypeVar
+from typing import Annotated, Literal, TypeVar
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
@@ -136,7 +136,7 @@ class Enrichment(BaseModel):
     """The complete research output for one account."""
 
     domain: str
-    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     name: Sourced[str] | None = None
     description: Sourced[str] | None = None

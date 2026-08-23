@@ -69,7 +69,7 @@ class ResearchConfig:
     # Keywords describing what WE sell. A prospect's job post mentioning these is the highest
     # weight signal available, and it is necessarily deployment-specific.
     our_category: tuple[str, ...] = field(default_factory=tuple)
-    llm: "InferenceProvider | None" = None
+    llm: InferenceProvider | None = None
 
 
 class InferenceProvider:

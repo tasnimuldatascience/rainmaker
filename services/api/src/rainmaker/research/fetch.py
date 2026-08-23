@@ -37,7 +37,7 @@ import urllib.parse
 import urllib.robotparser
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 log = logging.getLogger("rainmaker.research.fetch")
@@ -52,7 +52,7 @@ class Page:
     markdown: str
     title: str = ""
     status: int = 200
-    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     from_cache: bool = False
 
     @property
@@ -270,7 +270,7 @@ class PolitePool:
             fetched = datetime.fromisoformat(raw["fetched_at"])
         except (OSError, ValueError, KeyError):
             return None
-        if datetime.now(timezone.utc) - fetched > CACHE_TTL:
+        if datetime.now(UTC) - fetched > CACHE_TTL:
             return None
         return Page(
             url=raw["url"],
