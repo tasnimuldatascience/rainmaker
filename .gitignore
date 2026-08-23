@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Build artifacts and local state
+data/
+*.db
+*.sqlite3
+.cache/
+
+.env
+.env.local
+.DS_Store
+Thumbs.db
