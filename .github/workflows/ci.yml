@@ -9,9 +9,9 @@ jobs:
     name: CRDT (TypeScript)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "20", cache: npm }
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: npm }
       - run: npm ci
       - run: npx tsc --noEmit -p packages/crdt/tsconfig.json
       - run: npx tsc --noEmit -p apps/console/tsconfig.json
@@ -25,8 +25,8 @@ jobs:
       matrix:
         python: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "${{ matrix.python }}", cache: pip }
       - run: pip install -e "services/api[dev]"
       - run: ruff check services/api
@@ -39,10 +39,10 @@ jobs:
     name: TS ↔ Python merge agreement
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "20", cache: npm }
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: npm }
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12", cache: pip }
       - run: npm ci
       - run: pip install -e "services/api[dev]"

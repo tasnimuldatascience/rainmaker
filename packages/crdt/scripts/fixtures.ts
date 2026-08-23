@@ -22,6 +22,29 @@ import type { Op } from "../src/types";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, "../../../services/api/tests/fixtures/crdt_agreement.json");
 
+/**
+ * A fixed, shared wall clock.
+ *
+ * WHY THIS EXISTS. Half the cases below used to construct replicas with the default clock,
+ * which is `Date.now()`. That put real wall time into both the HLC timestamp and the op id
+ * (which encodes the wall in hex), so regenerating the file produced different bytes every
+ * single run. CI regenerates the fixtures and asserts `git diff --exit-code` — a check that
+ * could therefore only pass in the same millisecond the file was committed, and failed on
+ * every push forever after.
+ *
+ * A monotonic counter shared by every replica keeps the ordering semantics honest (later ops
+ * really do have later wall times, as they would in life) while making the output byte-stable.
+ * The base is arbitrary but fixed; it is well clear of zero so the values still look like
+ * plausible epoch milliseconds rather than accidentally exercising a zero-wall edge case.
+ */
+const CLOCK_BASE = 1_700_000_000_000;
+let tick = 0;
+const nextTick = () => CLOCK_BASE + tick++;
+
+/** A replica on the shared deterministic clock. */
+const replica = (actor: string, fixed?: number) =>
+  new Replica(actor, fixed === undefined ? nextTick : () => fixed);
+
 interface Case {
   name: string;
   ops: Op[];
@@ -30,16 +53,16 @@ interface Case {
 
 /** Replay ops into a fresh replica and read out what it decided. */
 function settle(name: string, ops: Op[], entities: string[]): Case {
-  const replica = new Replica("verifier");
-  replica.applyAll(ops);
+  const verifier = new Replica("verifier", nextTick);
+  verifier.applyAll(ops);
   const expected: Case["expected"] = {};
   for (const id of entities) {
-    const state = replica.get("deal", id);
+    const state = verifier.get("deal", id);
     expected[id] = {
       fields: Object.fromEntries(
         Object.entries(state?.fields ?? {}).map(([k, v]) => [k, v.value]),
       ),
-      tags: replica.tags("deal", id),
+      tags: verifier.tags("deal", id),
     };
   }
   return { name, ops, expected };
@@ -49,10 +72,9 @@ const cases: Case[] = [];
 
 // 1. Plain last-writer-wins, delivered out of order.
 {
-  const r = new Replica("alice", () => 1000);
+  const r = replica("alice", 1000);
   const first = r.set("deal", "d1", "stage", "discovery");
-  const clock = { now: 2000 };
-  const r2 = new Replica("alice", () => clock.now);
+  const r2 = replica("alice", 2000);
   const second = r2.set("deal", "d1", "stage", "negotiation");
   cases.push(settle("lww-out-of-order", [second, first], ["d1"]));
 }
@@ -61,8 +83,8 @@ const cases: Case[] = [];
 //    This is the case most likely to diverge between implementations, because it is the one
 //    where the answer is arbitrary and both sides must pick the SAME arbitrary answer.
 {
-  const alice = new Replica("alice", () => 1000);
-  const bob = new Replica("bob", () => 1000);
+  const alice = replica("alice", 1000);
+  const bob = replica("bob", 1000);
   const a = alice.set("deal", "d2", "owner", "alice");
   const b = bob.set("deal", "d2", "owner", "bob");
   cases.push(settle("concurrent-tiebreak", [a, b], ["d2"]));
@@ -71,8 +93,8 @@ const cases: Case[] = [];
 
 // 3. OR-Set: a remove that never observed a concurrent add.
 {
-  const alice = new Replica("alice");
-  const bob = new Replica("bob");
+  const alice = replica("alice");
+  const bob = replica("bob");
   const add1 = alice.addTag("deal", "d3", "enterprise");
   bob.apply(add1);
   const remove = bob.removeTag("deal", "d3", "enterprise");
@@ -82,7 +104,7 @@ const cases: Case[] = [];
 
 // 4. A cancellation that arrives before the thing it cancels.
 {
-  const alice = new Replica("alice");
+  const alice = replica("alice");
   const add = alice.addTag("deal", "d4", "vip");
   const remove = alice.removeTag("deal", "d4", "vip");
   cases.push(settle("orset-remove-before-add", [remove, add], ["d4"]));
@@ -90,8 +112,8 @@ const cases: Case[] = [];
 
 // 5. Several fields, several actors, shuffled — the everyday case.
 {
-  const alice = new Replica("alice");
-  const bob = new Replica("bob");
+  const alice = replica("alice");
+  const bob = replica("bob");
   const ops: Op[] = [
     alice.set("deal", "d5", "stage", "discovery"),
     bob.set("deal", "d5", "amount", 25000),
@@ -114,7 +136,7 @@ const cases: Case[] = [];
 
 // 6. Duplicate delivery — the flaky-connection case.
 {
-  const alice = new Replica("alice");
+  const alice = replica("alice");
   const ops = [
     alice.set("deal", "d6", "stage", "won"),
     alice.addTag("deal", "d6", "closed"),

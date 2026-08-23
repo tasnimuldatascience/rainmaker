@@ -135,12 +135,12 @@
           "tag": "enterprise",
           "instance": "alice:0",
           "ts": {
-            "wall": 1787484277500,
+            "wall": 1700000000006,
             "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000000:alice#1"
+          "id": "018bcfe56806:00000000:alice#1"
         },
         {
           "type": "removeTag",
@@ -151,12 +151,12 @@
             "alice:0"
           ],
           "ts": {
-            "wall": 1787484277500,
-            "counter": 2,
+            "wall": 1700000000008,
+            "counter": 0,
             "actor": "bob"
           },
           "actor": "bob",
-          "id": "01a02e5d8afc:00000002:bob#1"
+          "id": "018bcfe56808:00000000:bob#1"
         },
         {
           "type": "addTag",
@@ -165,12 +165,12 @@
           "tag": "enterprise",
           "instance": "alice:1",
           "ts": {
-            "wall": 1787484277500,
-            "counter": 1,
+            "wall": 1700000000009,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000001:alice#2"
+          "id": "018bcfe56809:00000000:alice#2"
         }
       ],
       "expected": {
@@ -194,12 +194,12 @@
             "alice:0"
           ],
           "ts": {
-            "wall": 1787484277500,
-            "counter": 1,
+            "wall": 1700000000014,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000001:alice#2"
+          "id": "018bcfe5680e:00000000:alice#2"
         },
         {
           "type": "addTag",
@@ -208,12 +208,12 @@
           "tag": "vip",
           "instance": "alice:0",
           "ts": {
-            "wall": 1787484277500,
+            "wall": 1700000000013,
             "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000000:alice#1"
+          "id": "018bcfe5680d:00000000:alice#1"
         }
       ],
       "expected": {
@@ -233,12 +233,12 @@
           "field": "amount",
           "value": 25000,
           "ts": {
-            "wall": 1787484277500,
+            "wall": 1700000000018,
             "counter": 0,
             "actor": "bob"
           },
           "actor": "bob",
-          "id": "01a02e5d8afc:00000000:bob#1"
+          "id": "018bcfe56812:00000000:bob#1"
         },
         {
           "type": "removeTag",
@@ -247,12 +247,12 @@
           "tag": "inbound",
           "instances": [],
           "ts": {
-            "wall": 1787484277500,
-            "counter": 2,
+            "wall": 1700000000022,
+            "counter": 0,
             "actor": "bob"
           },
           "actor": "bob",
-          "id": "01a02e5d8afc:00000002:bob#3"
+          "id": "018bcfe56816:00000000:bob#3"
         },
         {
           "type": "addTag",
@@ -261,12 +261,12 @@
           "tag": "mid-market",
           "instance": "bob:1",
           "ts": {
-            "wall": 1787484277500,
-            "counter": 1,
+            "wall": 1700000000020,
+            "counter": 0,
             "actor": "bob"
           },
           "actor": "bob",
-          "id": "01a02e5d8afc:00000001:bob#2"
+          "id": "018bcfe56814:00000000:bob#2"
         },
         {
           "type": "set",
@@ -275,12 +275,12 @@
           "field": "stage",
           "value": "proposal",
           "ts": {
-            "wall": 1787484277500,
-            "counter": 2,
+            "wall": 1700000000021,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000002:alice#3"
+          "id": "018bcfe56815:00000000:alice#3"
         },
         {
           "type": "addTag",
@@ -289,12 +289,12 @@
           "tag": "inbound",
           "instance": "alice:1",
           "ts": {
-            "wall": 1787484277500,
-            "counter": 1,
+            "wall": 1700000000019,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000001:alice#2"
+          "id": "018bcfe56813:00000000:alice#2"
         },
         {
           "type": "set",
@@ -303,12 +303,12 @@
           "field": "owner",
           "value": "alice@acme.dev",
           "ts": {
-            "wall": 1787484277500,
-            "counter": 3,
+            "wall": 1700000000023,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000003:alice#4"
+          "id": "018bcfe56817:00000000:alice#4"
         },
         {
           "type": "set",
@@ -317,12 +317,12 @@
           "field": "stage",
           "value": "discovery",
           "ts": {
-            "wall": 1787484277500,
+            "wall": 1700000000017,
             "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afc:00000000:alice#1"
+          "id": "018bcfe56811:00000000:alice#1"
         }
       ],
       "expected": {
@@ -349,12 +349,12 @@
           "field": "stage",
           "value": "won",
           "ts": {
-            "wall": 1787484277501,
+            "wall": 1700000000031,
             "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afd:00000000:alice#1"
+          "id": "018bcfe5681f:00000000:alice#1"
         },
         {
           "type": "addTag",
@@ -363,12 +363,12 @@
           "tag": "closed",
           "instance": "alice:1",
           "ts": {
-            "wall": 1787484277501,
-            "counter": 1,
+            "wall": 1700000000032,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afd:00000001:alice#2"
+          "id": "018bcfe56820:00000000:alice#2"
         },
         {
           "type": "set",
@@ -377,12 +377,12 @@
           "field": "stage",
           "value": "won",
           "ts": {
-            "wall": 1787484277501,
+            "wall": 1700000000031,
             "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afd:00000000:alice#1"
+          "id": "018bcfe5681f:00000000:alice#1"
         },
         {
           "type": "addTag",
@@ -391,12 +391,12 @@
           "tag": "closed",
           "instance": "alice:1",
           "ts": {
-            "wall": 1787484277501,
-            "counter": 1,
+            "wall": 1700000000032,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afd:00000001:alice#2"
+          "id": "018bcfe56820:00000000:alice#2"
         },
         {
           "type": "set",
@@ -405,12 +405,12 @@
           "field": "stage",
           "value": "won",
           "ts": {
-            "wall": 1787484277501,
+            "wall": 1700000000031,
             "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afd:00000000:alice#1"
+          "id": "018bcfe5681f:00000000:alice#1"
         },
         {
           "type": "addTag",
@@ -419,12 +419,12 @@
           "tag": "closed",
           "instance": "alice:1",
           "ts": {
-            "wall": 1787484277501,
-            "counter": 1,
+            "wall": 1700000000032,
+            "counter": 0,
             "actor": "alice"
           },
           "actor": "alice",
-          "id": "01a02e5d8afd:00000001:alice#2"
+          "id": "018bcfe56820:00000000:alice#2"
         }
       ],
       "expected": {
