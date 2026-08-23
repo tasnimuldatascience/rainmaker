@@ -1,11 +1,12 @@
 /**
  * The live call surface.
  *
- * WHAT THIS RENDERS HONESTLY. The avatar stage shows the placeholder provider, because the
- * realtime face (MuseTalk over a LivePortrait idle loop) needs several GB of weights and a
- * persistent GPU service that is not part of this repository's runnable path. Everything else
- * — disclosure, turn-taking, the transcript, and the measured per-stage latency budget — is
- * the real pipeline.
+ * WHAT THIS RENDERS HONESTLY. The face is a vector viseme rig (see Avatar.tsx) driven by the
+ * same audio-to-viseme path a neural renderer uses. The photoreal option — MuseTalk over a
+ * LivePortrait idle loop — sits behind the same provider interface but needs several GB of
+ * weights and a persistent GPU service, so it is not on this repository's runnable path.
+ * Everything else — disclosure, turn-taking, the transcript, and the measured per-stage
+ * latency budget — is the real pipeline.
  *
  * The latency strip is the centrepiece rather than decoration. Perceived realism in a voice
  * agent is dominated by turn latency, not by voice quality or face fidelity: past roughly
@@ -15,6 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocalStore } from "../lib/store";
+import { Avatar } from "./Avatar";
 
 interface Turn {
   who: "agent" | "prospect";
@@ -78,8 +80,13 @@ const SCRIPT: Turn[] = [
 export function CallView({ store }: { store: LocalStore }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [running, setRunning] = useState(false);
-  const [level, setLevel] = useState(0);
+  const [speech, setSpeech] = useState("");
+  const [speaking, setSpeaking] = useState(false);
   const timers = useRef<number[]>([]);
+  // Which utterance is currently on the air. Each turn's stop-timer captures this value and
+  // refuses to act if a later turn has already started -- without it, the stop scheduled for
+  // turn 1 fires in the middle of turn 3 and silences a mouth that should still be moving.
+  const utterance = useRef(0);
 
   // Every scheduled callback is cleared on unmount. Without this, leaving mid-call keeps
   // firing setState on an unmounted tree and the "call" silently continues in the background.
@@ -93,6 +100,9 @@ export function CallView({ store }: { store: LocalStore }) {
   const start = useCallback(() => {
     setTurns([]);
     setRunning(true);
+    setSpeech("");
+    setSpeaking(false);
+    utterance.current = 0;
     timers.current.forEach((t) => window.clearTimeout(t));
     timers.current = [];
 
@@ -105,10 +115,25 @@ export function CallView({ store }: { store: LocalStore }) {
             ? Object.values(turn.budget).reduce((a, b) => a + b, 0)
             : undefined;
           setTurns((prev) => [...prev, { ...turn, total }]);
-          setLevel(turn.who === "agent" ? 1 : 0.15);
+          if (turn.who === "agent") {
+            utterance.current += 1;
+            const mine = utterance.current;
+            setSpeech(turn.text);
+            setSpeaking(true);
+            // Stop the mouth when THIS utterance ends. ~52ms per character is the speaking
+            // rate a listener reads as natural; a mouth still moving after the audio stops is
+            // the most obvious tell that the animation is not actually driven by it.
+            timers.current.push(
+              window.setTimeout(() => {
+                if (utterance.current === mine) setSpeaking(false);
+              }, turn.text.length * 52),
+            );
+          } else {
+            utterance.current += 1;
+            setSpeaking(false);
+          }
           if (i === SCRIPT.length - 1) {
             setRunning(false);
-            setLevel(0);
           }
         }, delay),
       );
@@ -143,7 +168,7 @@ export function CallView({ store }: { store: LocalStore }) {
             <span className="disclosure">
               <span aria-hidden>◆</span> AI agent · disclosed at call start
             </span>
-            <AvatarPlaceholder level={level} active={running} />
+            <Avatar speech={speech} speaking={speaking} listening={running && !speaking} size={300} />
           </div>
 
           <div className="row">
@@ -252,38 +277,6 @@ export function CallView({ store }: { store: LocalStore }) {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * The placeholder avatar.
- *
- * An audio-reactive form rather than a face. Shipping a bad lip-synced render and calling it
- * a demo is worse than being clear about what is and is not wired: the provider interface is
- * real, this implementation is honest about being a stand-in.
- */
-function AvatarPlaceholder({ level, active }: { level: number; active: boolean }) {
-  return (
-    <div style={{ display: "grid", placeItems: "center", gap: "var(--s-4)" }}>
-      <div
-        style={{
-          inlineSize: 128,
-          blockSize: 128,
-          borderRadius: "50%",
-          background:
-            "conic-gradient(from 200deg, var(--accent), var(--agent), var(--info), var(--accent))",
-          filter: `blur(${active ? 0.5 : 2}px)`,
-          transform: `scale(${1 + level * 0.12})`,
-          transition: "transform 180ms var(--ease), filter 300ms var(--ease)",
-          boxShadow: `0 0 ${40 + level * 60}px -10px var(--agent)`,
-          opacity: active ? 1 : 0.55,
-        }}
-      />
-      <p className="tiny muted" style={{ maxInlineSize: "38ch", textAlign: "center" }}>
-        Placeholder avatar provider. The MuseTalk realtime face is implemented behind the same
-        interface but needs a GPU service — see the README for what is verified.
-      </p>
     </div>
   );
 }

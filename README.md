@@ -27,7 +27,7 @@ cooperate:
 
 <table>
 <tr><td width="150"><b>Research agent</b></td><td>Reads a prospect's public pages and returns <b>typed facts with sources</b> — pricing motion, stack, open roles, buying signals. Never prose, never an unsourced claim.</td></tr>
-<tr><td><b>Closer agent</b></td><td>Runs the call: discloses it is AI before anything else, grounds every claim in what research actually read, hands off the instant someone asks for a human. Measured 800ms turn budget.</td></tr>
+<tr><td><b>Closer agent</b></td><td>Runs the call with an animated face: discloses it is AI before anything else, grounds every claim in what research actually read, hands off the instant someone asks for a human. Measured 800ms turn budget.</td></tr>
 <tr><td><b>Rep console</b></td><td><b>Local-first.</b> Every edit lands on the device instantly and syncs when it can. Hand-rolled CRDT, IndexedDB, service worker, offline outbox.</td></tr>
 </table>
 
@@ -159,12 +159,27 @@ Fully open-source, self-hostable, with commercial adapters behind the same inter
 | turn-taking | **Silero VAD** + semantic endpointing | interrupting badly reads as fake instantly |
 | transport | **LiveKit** (Apache-2.0) | SFU, reconnection, adaptive bitrate |
 
+**The shipped face is a vector viseme rig** ([`Avatar.tsx`](apps/console/src/components/Avatar.tsx)) —
+deliberately the same pipeline a neural renderer uses:
+
+```
+audio / text ──► viseme sequence ──► mouth shape ──► frame
+```
+
+Only the last stage differs: vector paths instead of diffused pixels. Everything upstream — the
+phoneme→viseme mapping, timing, co-articulation, idle behaviour — is what a realtime avatar
+actually needs, and it is the part that decides whether a face reads as alive. What sells it is
+not the mouth: irregular blinking (periodic blinking is instantly robotic), continuous
+micro-sway, eye saccades that re-fix on the camera, brow lift on stressed syllables, and a
+listening pose with slowed blinking so she never freezes between utterances.
+
 > [!IMPORTANT]
 > **What is verified and what is not.** The orchestration, budget accounting, disclosure
-> enforcement, CRDT, sync, research agent, and console are implemented and tested. The realtime
-> avatar itself is **adapter code that has not been run end to end here** — it needs several GB
-> of weights and a persistent GPU service. `PlaceholderAvatar` is the default so the system runs
-> anywhere. Claiming a tested realtime avatar would fall apart in the first interview question.
+> enforcement, CRDT, sync, research agent, console, and the vector avatar are implemented and
+> running — the screenshot above is the live rig captured mid-utterance. The **photoreal**
+> option (MuseTalk over a LivePortrait idle loop) sits behind the same provider interface but
+> has **not been run end to end here**: it needs several GB of weights and a persistent GPU
+> service. Claiming a tested photoreal avatar would fall apart in the first interview question.
 
 <br>
 

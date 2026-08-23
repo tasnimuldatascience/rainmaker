@@ -28,12 +28,15 @@ const ctx = await browser.newContext({
 });
 const page = await ctx.newPage();
 
-async function shot(name, prepare) {
+async function shot(name, prepare, settleMs = 600) {
   await page.goto(BASE, { waitUntil: "networkidle" });
   // The seed writes through the op path, so give the replica a beat to hydrate and render.
   await page.waitForSelector(".deal", { timeout: 15000 }).catch(() => {});
   await prepare?.(page);
-  await page.waitForTimeout(600);
+  // `settleMs` is per-shot on purpose. The call shot waits for a specific ANIMATION FRAME
+  // (speaking, open viseme, not blinking) and a fixed settle afterwards throws that frame
+  // away -- the mouth has moved on by the time the shutter fires.
+  if (settleMs > 0) await page.waitForTimeout(settleMs);
   await page.screenshot({ path: resolve(OUT, `${name}.png`) });
   console.log(`wrote docs/img/${name}.png`);
 }
@@ -59,9 +62,26 @@ await shot("call", async (p) => {
   await setTheme("dark");
   await p.click('.nav button:has-text("Live call")');
   await p.click('button:has-text("Start call")');
-  // Long enough for several turns and a populated latency strip.
-  await p.waitForTimeout(9000);
-});
+  // Let the transcript and the latency strip fill in.
+  await p.waitForTimeout(9500);
+  // Then wait for a GOOD FRAME rather than sleeping and hoping: she must be speaking, on an
+  // open viseme, and not mid-blink. Sleeping caught her blinking on a closed mouth twice,
+  // which made a working rig look static in the one image people actually look at.
+  await p
+    .waitForFunction(
+      () => {
+        const el = document.querySelector("svg[data-speaking]");
+        return (
+          el?.getAttribute("data-speaking") === "true" &&
+          el.getAttribute("data-blink") === "false" &&
+          Number(el.getAttribute("data-mouth-open") ?? 0) > 12
+        );
+      },
+      null,
+      { timeout: 8000, polling: 30 },
+    )
+    .catch(() => console.warn("no open-mouth frame captured within the window"));
+}, 0);
 
 // The offline shot. This is the product's actual claim, so it is captured against a genuinely
 // severed connection rather than mocked: route abort kills the socket and every fetch, then
