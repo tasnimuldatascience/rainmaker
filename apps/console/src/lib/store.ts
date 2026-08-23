@@ -386,6 +386,16 @@ export class LocalStore {
  * and the prefix/suffix scan finds that in O(n) with no allocation. A full diff would buy
  * better behaviour only for paste-over-selection, which this already handles correctly if
  * less minimally.
+ *
+ * INDICES ARE CODE POINTS, NOT UTF-16 UNITS, and that distinction is the whole reason this
+ * function is not four lines shorter. `Replica.insertText` builds its sequence with
+ * `for (const char of str)`, which iterates code points -- so an emoji is ONE element in the
+ * text and every index the replica accepts is an index into code points.
+ *
+ * A string's `.length` and `[i]` count UTF-16 units instead, where an emoji is two. Mixing the
+ * two puts every edit after an emoji one position too far right, per emoji. It does not throw:
+ * it produces valid operations that quietly corrupt the note, and only for people who type
+ * emoji -- which, in sales notes, is most of them.
  */
 function diffToOps(
   replica: Replica,
@@ -397,20 +407,21 @@ function diffToOps(
 ): Op[] {
   if (before === after) return [];
 
+  // Array.from splits on code points, matching how the replica indexes its text.
+  const a = Array.from(before);
+  const b = Array.from(after);
+
   let start = 0;
-  const max = Math.min(before.length, after.length);
-  while (start < max && before[start] === after[start]) start += 1;
+  const max = Math.min(a.length, b.length);
+  while (start < max && a[start] === b[start]) start += 1;
 
   let end = 0;
-  while (
-    end < max - start &&
-    before[before.length - 1 - end] === after[after.length - 1 - end]
-  ) {
+  while (end < max - start && a[a.length - 1 - end] === b[b.length - 1 - end]) {
     end += 1;
   }
 
-  const removed = before.length - start - end;
-  const inserted = after.slice(start, after.length - end);
+  const removed = a.length - start - end;
+  const inserted = b.slice(start, b.length - end).join("");
 
   const ops: Op[] = [];
   if (removed > 0) ops.push(...replica.deleteText(kind, id, field, start, removed));

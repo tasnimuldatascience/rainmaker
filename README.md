@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-78%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-106%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -250,15 +250,35 @@ sentences.
 ## Tests
 
 ```bash
-npm test                       # 19 tests — including 300 random sync scenarios
+npm test                       # 47 tests — syncing and text editing
 pytest                         # 59 tests — research, syncing, cross-language agreement
 ```
 
 | Test file | What it protects |
 |---|---|
-| `convergence.test.ts` | Everyone ends up with the same data, whatever order changes arrive in |
+| `convergence.test.ts` | Everyone ends up with the same data, whatever order changes arrive in — plus that the order is actually *correct* |
+| `diff.test.ts` | Typing in a shared note produces the right text, including emoji and accents |
 | `test_research.py` | The research agent cannot invent facts, wander onto other websites, or read more pages than allowed |
 | `test_sync.py` | Duplicate changes, saving before broadcasting, slow clients, and TypeScript ↔ Python agreement |
+
+### A bug that convergence testing could not find
+
+The 300 randomised runs check that two devices **agree**. They passed throughout while shared
+notes were quietly scrambling, because both devices agreed on the same wrong answer — and
+agreeing on a wrong answer is still agreeing.
+
+Characters were ordered by comparing their ids as text. Ids look like `alice:6` and `alice:10`,
+and as text `"alice:10"` sorts before `"alice:6"`, because `1` comes before `6`. **So notes
+started scrambling after about ten keystrokes.**
+
+The first attempted fix — read the number properly and compare it numerically — was also wrong,
+and broke the case the first bug was hiding: those numbers count per person, so one person's
+edit number 0 can happen long after another person's edit number 5. Two people typing in the
+same sentence got their words tangled with text that predated them both.
+
+Both are now ordered by timestamp, which is the only value that compares meaningfully across
+people. It took a test that checked **what the text actually said**, rather than that two copies
+matched.
 
 ---
 

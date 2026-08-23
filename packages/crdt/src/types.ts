@@ -116,6 +116,13 @@ export interface TextChar {
   readonly id: string;
   readonly char: string;
   readonly after: string | null;
+  /**
+   * The insert's hybrid logical clock. Sibling characters -- ones sharing an `after` -- are
+   * ordered by this, which is the only value that orders inserts from DIFFERENT actors
+   * meaningfully. A per-actor sequence number cannot: one actor's 0 may be long after another
+   * actor's 5.
+   */
+  readonly ts: HLC;
   deleted: boolean;
 }
 

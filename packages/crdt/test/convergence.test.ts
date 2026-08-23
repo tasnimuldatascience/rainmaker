@@ -342,3 +342,66 @@ describe("collaborative text", () => {
     expect(r.text("deal", "d1", "notes").length).toBe(5000);
   });
 });
+
+describe("sibling ordering", () => {
+  /**
+   * Character ids are `actor:seq`. Comparing them as strings puts "t:10" before "t:6", because
+   * '1' sorts before '6' -- so text scrambles once a replica has emitted more than ten
+   * operations, which is about two sentences of typing.
+   *
+   * The convergence tests above did not catch it, and could not: they assert that two replicas
+   * AGREE, and both replicas agreed on the same wrong order. Convergence on a wrong answer is
+   * still convergence. These tests assert the RESULT instead.
+   */
+  it("orders inserts correctly past sequence number 10", () => {
+    const replica = new Replica("t");
+    // Eleven characters, so the next insert is seq 11 and collides with seq 6 under a string
+    // comparison.
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 0, "great news"));
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 6, "big "));
+    expect(replica.text("deal", "d1", "notes")).toBe("great big news");
+  });
+
+  it("keeps a long note in order through many separate edits", () => {
+    const replica = new Replica("t");
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 0, "one"));
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 3, " two"));
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 7, " three"));
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 13, " four"));
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 18, " five"));
+    expect(replica.text("deal", "d1", "notes")).toBe("one two three four five");
+  });
+
+  it("inserts into the middle of a long note at the right place", () => {
+    const replica = new Replica("t");
+    const seed = "the quick brown fox jumps over the lazy dog";
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 0, seed));
+    replica.applyAll(replica.insertText("deal", "d1", "notes", 4, "very "));
+    expect(replica.text("deal", "d1", "notes")).toBe(
+      "the very quick brown fox jumps over the lazy dog",
+    );
+  });
+
+  it("two actors inserting at the same point still converge", () => {
+    const alice = new Replica("alice");
+    const bob = new Replica("bob");
+    const seed = alice.insertText("deal", "d1", "notes", 0, "hello world");
+    alice.applyAll(seed);
+    bob.applyAll(seed);
+
+    const aliceOps = alice.insertText("deal", "d1", "notes", 5, " there");
+    const bobOps = bob.insertText("deal", "d1", "notes", 5, " big");
+
+    alice.applyAll(aliceOps);
+    alice.applyAll(bobOps);
+    bob.applyAll(bobOps);
+    bob.applyAll(aliceOps);
+
+    const merged = alice.text("deal", "d1", "notes");
+    expect(bob.text("deal", "d1", "notes")).toBe(merged);
+    expect(merged).toContain("there");
+    expect(merged).toContain("big");
+    expect(merged.startsWith("hello")).toBe(true);
+    expect(merged.endsWith("world")).toBe(true);
+  });
+});

@@ -233,6 +233,7 @@ export class Replica {
       id: op.charId,
       char: op.char,
       after: op.after,
+      ts: op.ts,
       deleted: state.pendingDeletes.delete(op.charId),
     });
     state.cache = null;
@@ -251,6 +252,7 @@ export class Replica {
         id: op.charId,
         char: op.char,
         after: op.after,
+        ts: op.ts,
         deleted: state.pendingDeletes.delete(op.charId),
       });
       state.cache = null;
@@ -330,9 +332,36 @@ function childrenOf(state: TextState): Map<string | null, TextChar[]> {
     byParent.set(ch.after, list);
   }
   for (const list of byParent.values()) {
-    list.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    list.sort(compareChars);
   }
   return byParent;
+}
+
+/**
+ * Order two sibling characters -- ones inserted at the same position. Newest first, so a
+ * character typed into a gap lands before the text that already followed it.
+ *
+ * ORDER BY TIMESTAMP, NOT BY ID. Two earlier versions of this were both wrong:
+ *
+ *   `a.id < b.id` as strings put "t:10" before "t:6", because '1' sorts before '6'. Text
+ *   silently scrambled once a replica had emitted ten operations -- about two sentences of
+ *   typing.
+ *
+ *   Parsing the sequence number and comparing it numerically fixed that and broke the case it
+ *   was hiding: sequence numbers are PER ACTOR, so one replica's 0 may be long after another
+ *   replica's 5. Two people typing into the same sentence got their words interleaved with
+ *   text that predated them both.
+ *
+ * The hybrid logical clock is the value that orders inserts across actors correctly, and every
+ * op already carries one. `compare` breaks a genuine tie on the actor id, so the order is total
+ * and identical on every replica.
+ *
+ * Neither bug was caught by the 300 randomised convergence runs, and neither could be: those
+ * assert that two replicas AGREE, and both replicas agreed on the same wrong order. Convergence
+ * on a wrong answer is still convergence. It took a test that asserted the RESULT of an edit.
+ */
+function compareChars(a: TextChar, b: TextChar): number {
+  return compare(b.ts, a.ts);
 }
 
 /** Depth-first walk of the insertion tree, yielding document order. */
