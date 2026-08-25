@@ -9,8 +9,8 @@
                         └────────────────┬────────────────────────┘
                                          │ enrichment
                                          ▼
-   prospect ◄── WebRTC ──►  closer agent  ──── transcript, outcome ───┐
-                            (STT→LLM→TTS→avatar, 800ms budget)        │
+   prospect ◄── WebSocket ►  closer agent  ─── transcript, outcome ───┐
+                            (text/speech in, Qwen → Kokoro out)       │
                                                                       ▼
    rep's laptop                                              ┌────────────────┐
    ┌──────────────────────────────┐      ops (WS or POST)    │  op log        │
@@ -119,6 +119,30 @@ where being confidently wrong costs the deal.
 A model-derived value that carries no excerpt cannot be constructed. Enforced in the schema
 rather than in review, because the rule is worthless if a caller can forget it.
 
+### The voice runs on the CPU, and that is where the latency budget goes
+
+Kokoro-82M synthesises at 1.7–2.9x realtime on CPU, but the number that matters is its FIXED
+cost: ~340ms per call on a sixteen-core laptop, almost independent of how short the text is
+(3 characters cost 386ms, 13 cost 444ms). So the floor on "silence after the prospect stops" is
+about 380ms no matter how the reply is chunked, and the measured median is 724ms — the floor
+plus the wait for enough tokens to cut a first chunk from.
+
+Chunking still pays for itself many times over: the same 175-character reply is 3007ms to first
+sound synthesised whole and 407ms synthesised first-clause-first. What chunking cannot do is
+beat the fixed cost.
+
+**Rejected: moving synthesis to the GPU.** `onnxruntime-gpu` would likely take the fixed term
+down substantially and is the obvious next step. It is another dependency, another install path,
+and another way for a fresh clone to fail — and the rule here is that a clone runs. The turn
+budget is missed by roughly 100ms on typed input as a result, and the console displays that
+rather than hiding it.
+
+**Rejected: server-side transcription.** faster-whisper would keep audio on the machine, which
+fits everything else about this design, and it would compete with Kokoro for the same cores on
+the one path where latency is visible. The browser's recogniser is free, streams partials, and
+leaves the CPU to the two models that need it. The cost is real and stated in the console:
+Chrome sends microphone audio to Google. Typing is the offline path.
+
 ### The API materialiser does not implement RGA
 
 It returns note *lengths*, not merged text. A second sequence CRDT is where drift would be worst
@@ -157,7 +181,9 @@ data being present. Fixed with a service worker; the shot is now in the README a
   enforced at the relay, which is the only place it can be enforced.
 - **Log compaction.** The op log grows forever. A production system needs periodic snapshotting
   with tombstone GC — which for RGA means proving no live insert anchors to a collected char.
-- **Real WebRTC media.** The call pipeline's interfaces and budget accounting are real; the
-  transport is not wired to LiveKit here.
+- **Real WebRTC media.** The conversation is real and runs over a WebSocket, with audio sent as
+  base64 WAV per clause. A production deployment wants LiveKit or equivalent for jitter buffering,
+  reconnects and echo cancellation; none of that is here.
+- **GPU synthesis.** See above. The single change most likely to bring the turn inside budget.
 - **The realtime avatar.** Adapter code exists; the GPU service does not. Stated in the README
   rather than implied.

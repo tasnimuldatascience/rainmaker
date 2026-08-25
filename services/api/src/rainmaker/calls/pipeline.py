@@ -2,35 +2,50 @@
 
 THE LATENCY BUDGET IS THE PRODUCT. Human conversation tolerates roughly 300ms of silence
 before a pause becomes noticeable and roughly 800ms before it reads as "something is wrong
-with this person". Every architectural decision below is downstream of that number:
+with this person". Every architectural decision below is downstream of that number.
 
-    stage           naive        streamed      budget
-    ─────────────────────────────────────────────────
-    VAD / endpoint    250ms        250ms         250ms   unavoidable: must hear silence
-    STT final         400ms         60ms          80ms   stream partials, finalise on endpoint
-    LLM first token   700ms        220ms         250ms   stream; never wait for completion
-    TTS first audio   350ms         70ms         100ms   start on the first clause, not the sentence
-    lip-sync          120ms         30ms          40ms   pipeline against the audio stream
-    ─────────────────────────────────────────────────
-    total          ~1820ms       ~630ms         720ms
+MEASURED, NOT PROJECTED. This table used to hold the numbers the design was aiming at, which
+is a reasonable thing to write before the engines exist and a dishonest thing to leave once
+they do. These are fifteen typed turns against Qwen2.5-1.5B on a laptop RTX 5070 and Kokoro-82M
+on sixteen CPU cores, reported by `LatencyBudget` on the wire:
 
-The naive column is what you get by awaiting each stage. The streamed column is what this
-pipeline is built to achieve, by starting every stage on the first token of the previous one.
-`LatencyBudget` measures the real thing per turn and the console renders it, because a budget
-nobody measures is a wish.
+    stage                    median      range       who measures it
+    ───────────────────────────────────────────────────────────────────────────
+    transcription              n/a         n/a       the browser, when spoken
+    LLM, to first token       139ms    101-354ms     here
+    TTS, to first audio       724ms    561-1022ms    here
+    first frame                n/a         n/a       the browser
+    ───────────────────────────────────────────────────────────────────────────
+    turn, to first sound      850ms    692-1175ms    typed input, no transcription
+
+WHAT THE STREAMING IS WORTH, on one 175-character reply, same text both ways:
+
+    synthesised whole, then played       3007ms of silence first
+    synthesised first clause first        407ms of silence first
+
+So the clause-streaming in `clauses.py` is worth about 2.6 seconds a turn, and it is the reason
+this is a conversation rather than a form submission.
+
+WHERE THE REMAINING TIME GOES, stated plainly because the budget is missed: synthesis. Kokoro
+costs roughly 340ms of fixed setup per call on this CPU regardless of how short the text is
+(see `providers.KokoroTextToSpeech`), so no amount of chunking gets the first sound under about
+380ms, and the measured 724ms is that floor plus the wait for enough tokens to cut a chunk from.
+Moving synthesis to the GPU is the obvious next move and is NOT done here — onnxruntime-gpu is
+another dependency and another install step, and this repository's rule is that a clone runs.
 
 WHAT IS VERIFIED AND WHAT IS NOT — stated here rather than discovered by a reader:
-the orchestration, budget accounting, disclosure enforcement, and the provider interfaces are
-implemented and tested. The realtime avatar itself (MuseTalk over a LivePortrait idle loop) is
-adapter code that has NOT been run end to end in this repository: it needs several GB of
-weights and a persistent GPU service. `PlaceholderAvatar` is the default so the system runs
-anywhere, and the README carries the same distinction.
+the orchestration, budget accounting, disclosure enforcement and both local engines are
+implemented, tested, and run end to end; the numbers above came out of that path. The
+photo-realistic avatar (MuseTalk over a LivePortrait idle loop) is adapter code that has NOT
+been run here: it needs several GB of weights and a persistent GPU service. `PlaceholderAvatar`
+is the default so the system runs anywhere, and the README carries the same distinction.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
@@ -74,13 +89,62 @@ class LatencyBudget:
     def within_budget(self) -> bool:
         return self.total_ms <= TURN_BUDGET_MS
 
+    def skip(self) -> None:
+        """Advance the clock past work this process did not do, recording nothing.
+
+        Without this the choice is between reporting a stage that did not happen and silently
+        attributing its elapsed time to the NEXT stage, which is worse: the number would still
+        be wrong and would no longer be labelled.
+        """
+        self._last = time.perf_counter()
+
+    def adopt(self, stage: Stage | str, ms: float) -> None:
+        """Record a stage this process did not perform.
+
+        TWO OF THE FOUR STAGES HAPPEN IN THE BROWSER and the server cannot see either.
+        Transcription — including the endpointing inside it, which the browser's recogniser does
+        not report separately — belongs to the client, and so does the avatar's first frame.
+        Estimating them here would make the strip a drawing of a budget rather than a
+        measurement of one, so the client measures them and sends the numbers with its next
+        message.
+        """
+        self.marks[str(stage)] = round(max(0.0, float(ms)), 2)
+
     def report(self) -> dict[str, float | bool]:
         return {**self.marks, "total_ms": self.total_ms, "within_budget": self.within_budget}
+
+
+# ───────────────────────────────────────────────────────────── what synthesis hands back
+@dataclass(slots=True)
+class Clip:
+    """One synthesised chunk of a reply: the audio, and what it is audio *of*.
+
+    RAW BYTES WERE NOT ENOUGH, and the face is what proved it. Synthesis used to yield
+    `bytes`, so nothing downstream knew what was being said or for how long — which left the
+    console animating the mouth from a hardcoded 52ms-per-character timer, guessing at audio it
+    was holding in its hand. A clip carries its own text and duration, so the viseme sequence
+    and the moment the mouth stops are both derived from the thing actually being played.
+    """
+
+    text: str
+    wav: bytes
+    sample_rate: int = 24_000
+    duration_ms: float = 0.0
+    generate_ms: float = 0.0
+    index: int = 0
+    #: True when there is no local voice and the client must speak this text itself.
+    browser_voice: bool = False
 
 
 # ───────────────────────────────────────────────────────────── provider interfaces
 class SpeechToText(ABC):
     """Streaming transcription. Yields partials, then a final on endpoint."""
+
+    #: Whether timing this provider measures anything real. False for an adapter that receives
+    #: text already transcribed elsewhere: the queue read takes microseconds, and reporting it
+    #: as the transcription stage puts a confident "stt 0ms" on the strip for work that either
+    #: happened in the browser or, for typed input, never happened at all.
+    measured: bool = True
 
     @abstractmethod
     def stream(self, audio: AsyncIterator[bytes]) -> AsyncIterator[tuple[str, bool]]: ...
@@ -95,10 +159,20 @@ class LanguageModel(ABC):
 
 
 class TextToSpeech(ABC):
-    """Streaming synthesis. Started on the first CLAUSE, not the first sentence."""
+    """Streaming synthesis. Started on the first CLAUSE, not the first sentence.
+
+    One abstract method, deliberately: `clips` is strictly more than a byte stream and
+    everything that only wants bytes — the avatar — gets them from the concrete `stream`
+    below. Two abstract methods would let an implementation satisfy one and not the other.
+    """
 
     @abstractmethod
-    def stream(self, text: AsyncIterator[str]) -> AsyncIterator[bytes]: ...
+    def clips(self, text: AsyncIterator[str]) -> AsyncIterator[Clip]: ...
+
+    async def stream(self, text: AsyncIterator[str]) -> AsyncIterator[bytes]:
+        """Audio only, for consumers that have no use for the words — chiefly `Avatar`."""
+        async for clip in self.clips(text):
+            yield clip.wav
 
 
 class Avatar(ABC):
@@ -183,6 +257,57 @@ class Disclosure:
             )
 
 
+#: How many sentences the agent is allowed per turn.
+#:
+#: THE PROMPT ASKS FOR THIS AND THE MODEL DOES NOT COMPLY. Measured over five real turns with
+#: "One or two sentences. Never more." at the top of the system prompt, Qwen2.5-1.5B produced
+#: replies of 308, 365, 416, 429 and 462 characters — four to six sentences every time. At 110
+#: max tokens the last of them was cut off mid-word, so the agent ended turns by trailing into
+#: silence mid-sentence, which is worse than either a long reply or a short one.
+#:
+#: So the limit is enforced rather than requested, for the same reason the handoff is: a rule
+#: that matters is not left to a 1.5B model's judgement. Two sentences is also what makes the
+#: latency work — the reply finishes while the listener is still hearing the first clause.
+MAX_SENTENCES = 2
+
+#: A sentence ends at punctuation followed by space or end of text. The lookahead is what keeps
+#: "40.5" and "rainmaker.io" from ending a turn.
+_SENTENCE_END = re.compile(r"[.!?]+(?=\s|$)")
+
+
+async def cap_sentences(
+    stream: AsyncIterator[str], limit: int = MAX_SENTENCES
+) -> AsyncIterator[str]:
+    """Pass tokens through until `limit` sentences are complete, then stop the model.
+
+    The generator is closed rather than merely abandoned, so generation actually stops and the
+    GPU is free for the next turn. Dropping the reference instead would leave the model writing
+    three more sentences nobody will hear, on the one device the next turn is waiting for.
+    """
+    if limit <= 0:
+        return
+
+    emitted = ""
+    tokens = stream.__aiter__()
+    try:
+        async for token in tokens:
+            emitted += token
+            ends = list(_SENTENCE_END.finditer(emitted))
+            if len(ends) < limit:
+                yield token
+                continue
+
+            # Yield only the part of this token that belongs to the final sentence. Emitting
+            # the whole token would let a stray fragment of sentence three reach synthesis.
+            cut = ends[limit - 1].end()
+            keep = len(token) - (len(emitted) - cut)
+            if keep > 0:
+                yield token[:keep]
+            return
+    finally:
+        await tokens.aclose()
+
+
 # ───────────────────────────────────────────────────────────── the turn loop
 @dataclass
 class TurnResult:
@@ -190,6 +315,39 @@ class TurnResult:
     response: str
     budget: LatencyBudget
     handoff_requested: bool = False
+
+
+# ───────────────────────────────────────────────────────────── what a turn emits
+@dataclass(slots=True)
+class Heard:
+    """A transcript, partial or final."""
+
+    text: str
+    final: bool
+
+
+@dataclass(slots=True)
+class Thought:
+    """One token from the model, as it was produced."""
+
+    token: str
+
+
+@dataclass(slots=True)
+class Spoke:
+    """One synthesised chunk, ready to play."""
+
+    clip: Clip
+
+
+@dataclass(slots=True)
+class Finished:
+    """The turn is over. Carries the budget and whether a human was asked for."""
+
+    result: TurnResult
+
+
+TurnEvent = Heard | Thought | Spoke | Finished
 
 
 class CallPipeline:
@@ -207,10 +365,12 @@ class CallPipeline:
         tts: TextToSpeech,
         avatar: Avatar | None = None,
         disclosure: Disclosure | None = None,
+        max_sentences: int = MAX_SENTENCES,
     ):
         self.stt = stt
         self.llm = llm
         self.tts = tts
+        self.max_sentences = max_sentences
         self.avatar = avatar or PlaceholderAvatar()
         self.disclosure = disclosure or Disclosure()
         self._disclosed = False
@@ -221,9 +381,21 @@ class CallPipeline:
         log.info("call opened; %s", self.disclosure.logged)
         return self.disclosure.spoken
 
-    async def turn(
+    async def stream_turn(
         self, audio: AsyncIterator[bytes], context: dict | None = None
-    ) -> TurnResult:
+    ) -> AsyncIterator[TurnEvent]:
+        """One turn, emitting each piece the instant it exists.
+
+        THIS IS THE METHOD A LIVE CALL USES. `turn()` below drains it and hands back the
+        finished result, which is the right shape for a test and the wrong shape for a socket:
+        a caller that waits for the return value cannot start playing the first clause, and
+        starting on the first clause is the entire latency argument of this project.
+
+        Tokens and clips are interleaved through one queue rather than returned as two streams.
+        The alternative — the caption stream and the audio stream as separate iterators — reads
+        cleaner and lets them drift, so the words on screen would stop matching the words in the
+        ear at exactly the moment someone is watching closely.
+        """
         if not self._disclosed:
             raise DisclosureError(
                 "turn() before open(): the AI disclosure has not been delivered. "
@@ -236,29 +408,57 @@ class CallPipeline:
         transcript = ""
         async for text, final in self.stt.stream(audio):
             transcript = text
+            yield Heard(text, final)
             if final:
                 break
-        budget.mark(Stage.STT)
+        if getattr(self.stt, "measured", True):
+            budget.mark(Stage.STT)
+        else:
+            budget.skip()
 
         response_parts: list[str] = []
         first_token_seen = False
+        events: asyncio.Queue[TurnEvent | None] = asyncio.Queue()
 
         async def token_stream() -> AsyncIterator[str]:
             nonlocal first_token_seen
-            async for token in self.llm.stream(transcript, context):
+            async for token in cap_sentences(self.llm.stream(transcript, context), self.max_sentences):
                 if not first_token_seen:
                     first_token_seen = True
                     budget.mark(Stage.LLM)
                 response_parts.append(token)
+                events.put_nowait(Thought(token))
                 yield token
 
-        audio_out = self.tts.stream(token_stream())
-        first_audio = False
-        async for _chunk in audio_out:
-            if not first_audio:
-                first_audio = True
-                budget.mark(Stage.TTS)
-        budget.mark(Stage.AVATAR)
+        async def synthesise() -> None:
+            first_clip = True
+            try:
+                async for clip in self.tts.clips(token_stream()):
+                    if first_clip:
+                        first_clip = False
+                        budget.mark(Stage.TTS)
+                    events.put_nowait(Spoke(clip))
+            except Exception:  # noqa: BLE001
+                # A synthesis failure must end the turn, not wedge it. The prospect gets a
+                # short reply and a log line; a hung socket would look like the agent ignoring
+                # them, which is worse than a bad answer.
+                log.exception("synthesis failed mid-turn")
+            finally:
+                events.put_nowait(None)
+
+        worker = asyncio.create_task(synthesise())
+        try:
+            while True:
+                event = await events.get()
+                if event is None:
+                    break
+                yield event
+        finally:
+            # Barge-in: the consumer stops iterating and the generator is closed. Without this
+            # the model keeps generating into a queue nobody reads, and the next turn queues
+            # behind a GPU still busy with an answer the prospect interrupted.
+            if not worker.done():
+                worker.cancel()
 
         response = "".join(response_parts)
         if not budget.within_budget:
@@ -266,26 +466,26 @@ class CallPipeline:
                 "turn exceeded budget: %.0fms > %.0fms  %s",
                 budget.total_ms, TURN_BUDGET_MS, budget.marks,
             )
-        return TurnResult(
-            transcript=transcript,
-            response=response,
-            budget=budget,
-            handoff_requested=_wants_human(transcript),
+        yield Finished(
+            TurnResult(
+                transcript=transcript,
+                response=response,
+                budget=budget,
+                handoff_requested=_wants_human(transcript),
+            )
         )
 
-
-def _first_clause(text: str) -> tuple[str, str]:
-    """Split at the earliest natural pause. Synthesis starts here rather than at the sentence.
-
-    Starting TTS at the first clause rather than the first sentence is worth roughly 200ms per
-    turn, which is a quarter of the entire budget.
-    """
-    for i, ch in enumerate(text):
-        if ch in ",;:" and i > 12:
-            return text[: i + 1], text[i + 1 :]
-        if ch in ".!?" and i > 4:
-            return text[: i + 1], text[i + 1 :]
-    return "", text
+    async def turn(
+        self, audio: AsyncIterator[bytes], context: dict | None = None
+    ) -> TurnResult:
+        """The whole turn, awaited. Built on `stream_turn` so there is one turn loop, not two."""
+        result: TurnResult | None = None
+        async for event in self.stream_turn(audio, context):
+            if isinstance(event, Finished):
+                result = event.result
+        if result is None:  # pragma: no cover — structurally impossible, cheap to assert
+            raise RuntimeError("stream_turn ended without a Finished event")
+        return result
 
 
 _HUMAN_REQUEST = (

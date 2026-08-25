@@ -190,6 +190,21 @@ class PlaywrightFetcher(Fetcher):
             await self._pw.stop()
 
 
+#: How long to wait for a robots.txt. Short on purpose: it is a courtesy check standing between
+#: the agent and the page it was asked to read, so a host that will not answer must cost a
+#: couple of seconds rather than however long the OS takes to abandon a connection.
+ROBOTS_TIMEOUT = 3.0
+
+
+def _read_robots(url: str, timeout: float) -> str:
+    """Fetch a robots.txt with a timeout `RobotFileParser.read()` does not offer."""
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 — https only
+        charset = response.headers.get_content_charset() or "utf-8"
+        return response.read().decode(charset, errors="replace")
+
+
 class PolitePool:
     """Applies the policy: robots, per-host rate limit, cache, budget.
 
@@ -222,11 +237,16 @@ class PolitePool:
     async def _robots_for(self, host: str):
         if host in self._robots:
             return self._robots[host]
+
         parser = urllib.robotparser.RobotFileParser()
         parser.set_url(f"https://{host}/robots.txt")
         try:
-            # robotparser.read() is blocking; keep it off the event loop.
-            await asyncio.to_thread(parser.read)
+            # `RobotFileParser.read()` calls `urlopen` WITH NO TIMEOUT, so a host that black-
+            # holes port 443 blocks a worker thread for however long the OS takes to give up —
+            # measured at seven seconds per attempt on Windows. Fetching it here instead means
+            # the timeout is ours to set, and a slow robots endpoint costs a bounded amount.
+            body = await asyncio.to_thread(_read_robots, parser.url, ROBOTS_TIMEOUT)
+            parser.parse(body.splitlines())
         except Exception as exc:  # noqa: BLE001
             # A missing or unreachable robots.txt means "no restrictions stated". Treating a
             # fetch failure as a blanket deny would make the agent useless against any site
@@ -247,6 +267,22 @@ class PolitePool:
         return parser.can_fetch(self.user_agent, url)
 
     async def crawl_delay(self, url: str) -> float:
+        """How long to wait before the next request to this host.
+
+        THE `respect_robots` CHECK IS NOT OPTIONAL HERE, and its absence was a real bug rather
+        than an inelegance. `allowed()` short-circuits when robots is switched off; this method
+        did not, so every fetch still went and got robots.txt just to read a crawl-delay that
+        was about to be ignored. The visible symptom was in the test suite: `test_research.py`
+        opens with "No network", and it was making three real TCP connections to a registered
+        third-party domain per test — seven seconds each on a connection that gets dropped,
+        which is where two and a half minutes of a five-second suite went.
+
+        Switching robots off and then obeying its crawl-delay is also incoherent on its own
+        terms. A caller that sets `respect_robots=False` has said what interval it wants, and
+        `min_interval` is it.
+        """
+        if not self.respect_robots:
+            return self.min_interval
         host = urllib.parse.urlparse(url).netloc
         parser = await self._robots_for(host)
         if parser is None:

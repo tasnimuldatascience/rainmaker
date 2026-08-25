@@ -17,6 +17,7 @@ from rainmaker.research import (
     CompanySize,
     NullFetcher,
     Page,
+    PolitePool,
     PricingModel,
     Provenance,
     ResearchAgent,
@@ -321,3 +322,61 @@ class TestSchemaGuarantees:
     def test_a_bare_word_is_not_a_domain(self):
         with pytest.raises(ValueError):
             ResearchRequest(domain="localhost")
+
+
+class TestTheSuiteReallyDoesNotUseTheNetwork:
+    """This module opens with "No network." That was not true, and nothing checked it.
+
+    `PolitePool.allowed` honoured `respect_robots=False` and `PolitePool.crawl_delay` did not,
+    so every fetch still went out for a robots.txt in order to read a crawl-delay it was about
+    to discard. `SITE`'s domain is registered to someone else, so the suite made three real TCP
+    connections to a third party per test and each one took seven seconds to be dropped: 0.26s
+    of research tests presented as two and a half minutes.
+
+    A comment claiming there is no network is worth exactly as much as the assertion under it.
+    """
+
+    async def test_no_socket_is_opened_while_researching(self, monkeypatch):
+        import socket
+
+        opened: list[object] = []
+        real_connect = socket.socket.connect
+
+        def refuse(self, address):  # noqa: ANN001
+            # The event loop's own self-pipe is loopback and must still work; anything leaving
+            # this machine is the bug.
+            host = address[0] if isinstance(address, tuple) else str(address)
+            if not str(host).startswith("127."):
+                opened.append(address)
+                raise AssertionError(f"the research agent reached out to {address}")
+            return real_connect(self, address)
+
+        monkeypatch.setattr(socket.socket, "connect", refuse)
+        monkeypatch.setattr(
+            socket, "getaddrinfo", _fail_on_dns(socket.getaddrinfo, opened)
+        )
+
+        agent = ResearchAgent(
+            NullFetcher(SITE), ResearchConfig(min_interval=0.0, respect_robots=False)
+        )
+        await agent.research(ResearchRequest(domain="acme.dev"))
+        await agent.close()
+        assert opened == []
+
+    async def test_robots_is_not_fetched_when_it_is_switched_off(self):
+        """The coherence point, separate from the speed one: a caller that has turned robots off
+        has stated its own interval, and going to ask the site for a different one is asking a
+        question whose answer is already ignored."""
+        pool = PolitePool(NullFetcher(SITE), min_interval=0.25, respect_robots=False)
+        assert await pool.crawl_delay("https://acme.dev/pricing") == 0.25
+        assert pool._robots == {}, "robots.txt was fetched despite being switched off"
+
+
+def _fail_on_dns(real, opened: list[object]):
+    def guard(host, *args, **kwargs):
+        if host not in (None, "localhost", "127.0.0.1", "::1"):
+            opened.append(host)
+            raise AssertionError(f"the research agent resolved {host}")
+        return real(host, *args, **kwargs)
+
+    return guard

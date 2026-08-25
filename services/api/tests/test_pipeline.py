@@ -22,6 +22,7 @@ import pytest
 
 from rainmaker.calls.pipeline import (
     CallPipeline,
+    Clip,
     Disclosure,
     DisclosureError,
     LanguageModel,
@@ -69,12 +70,13 @@ class FakeTTS(TextToSpeech):
 
     def __init__(self):
         self.tokens_seen: list[str] = []
-        self.chunks_before_first_audio = 0
 
-    async def stream(self, text: AsyncIterator[str]) -> AsyncIterator[bytes]:
+    async def clips(self, text: AsyncIterator[str]) -> AsyncIterator[Clip]:
+        index = 0
         async for token in text:
             self.tokens_seen.append(token)
-            yield b"\x00\x01"
+            yield Clip(text=token, wav=b"\x00\x01", duration_ms=40.0, index=index)
+            index += 1
 
 
 async def silence(chunks: int = 3) -> AsyncIterator[bytes]:
@@ -189,10 +191,28 @@ class TestTheTurnLoop:
         self.run(call)
         assert len(tts.tokens_seen) >= 4, tts.tokens_seen
 
-    def test_every_stage_is_measured(self):
+    def test_every_server_side_stage_is_measured(self):
+        """Three of the five stages happen here. The other two happen in the browser and are
+        adopted from it — see `LatencyBudget.adopt`. Marking them here would be a guess wearing
+        a measurement's clothes."""
         result = self.run(pipeline())
-        for stage in ("stt", "llm", "tts", "avatar"):
+        for stage in ("stt", "llm", "tts"):
             assert stage in result.budget.marks, f"{stage} was never marked"
+
+    def test_the_client_measured_stages_are_adopted_not_invented(self):
+        budget = LatencyBudget()
+        budget.mark(Stage.LLM)
+        budget.adopt(Stage.STT, 244.0)
+        budget.adopt(Stage.AVATAR, 31.0)
+        assert budget.marks["stt"] == 244.0
+        assert budget.marks["avatar"] == 31.0
+
+    def test_a_negative_client_measurement_is_clamped(self):
+        """The client computes these from two `performance.now()` readings. A clock that goes
+        backwards across a tab suspend would otherwise subtract from the total."""
+        budget = LatencyBudget()
+        budget.adopt(Stage.STT, -12.0)
+        assert budget.marks["stt"] == 0.0
 
     def test_context_reaches_the_model(self):
         llm = FakeLLM()

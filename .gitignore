@@ -15,6 +15,10 @@ venv/
 .ruff_cache/
 .coverage
 
+# Model weights. Fetched by scripts/fetch-models.py, never committed: 330MB of ONNX in git
+# history is 330MB every clone pays forever, and the file is byte-identical for everyone.
+services/api/models/
+
 # Runtime state. The op log and research cache are rebuilt by running the system.
 data/
 *.db

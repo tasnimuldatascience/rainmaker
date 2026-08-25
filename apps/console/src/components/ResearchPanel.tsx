@@ -48,6 +48,32 @@ const PROV_TITLE: Record<Provenance, string> = {
   inferred: "A language model's reading — check the excerpt",
 };
 
+/**
+ * Hand the last research result to the live call.
+ *
+ * The agent may only state facts that came from somewhere, and this is where they come from —
+ * `CallView` reads it back and sends it as the call's brief. Stored rather than lifted into
+ * shared state because a rep who researched a company yesterday should not have to do it again
+ * before ringing them, which is the same reason the pipeline itself is local-first.
+ *
+ * Failing silently is correct here: a brief that cannot be saved costs the agent some
+ * specificity, and an error toast about localStorage in the middle of research helps no one.
+ */
+function rememberBrief(enrichment: Enrichment): void {
+  try {
+    localStorage.setItem(
+      "rainmaker-last-brief",
+      JSON.stringify({
+        company: enrichment.name?.value ?? enrichment.domain,
+        domain: enrichment.domain,
+        enrichment,
+      }),
+    );
+  } catch {
+    /* private browsing, quota, a locked-down profile — none of them are worth a message */
+  }
+}
+
 export function ResearchPanel({ store }: { store: LocalStore }) {
   const [domain, setDomain] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,7 +92,9 @@ export function ResearchPanel({ store }: { store: LocalStore }) {
         body: JSON.stringify({ domain: target, max_pages: 12 }),
       });
       if (!res.ok) throw new Error((await res.text()).slice(0, 300));
-      setResult((await res.json()) as Enrichment);
+      const enrichment = (await res.json()) as Enrichment;
+      setResult(enrichment);
+      rememberBrief(enrichment);
     } catch (err) {
       // The research agent needs the network; the rest of the console does not. Saying so
       // explicitly beats a spinner that never resolves.

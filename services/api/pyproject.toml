@@ -14,7 +14,18 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.44"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5", "pytest-cov>=5.0"]
+# The local voice. ~40MB of wheels plus a 330MB model fetched by scripts/fetch-models.py.
+# Optional because the agent still talks without it — the browser speaks instead, and
+# /api/calls/health says which one is running.
+voice = ["kokoro-onnx>=0.4", "onnxruntime>=1.17", "numpy>=1.26"]
+# The local model. Deliberately NOT installed by default: torch is ~2.5GB, and a reviewer
+# cloning this repository should reach a working call without it. Without `brain` the agent
+# answers from a small grounded script (see calls/providers.py).
+brain = ["torch>=2.2", "transformers>=4.44"]
+# `numpy` is here rather than only in `voice` because `test_call.py` asserts the WAV header the
+# synthesiser writes, and a test that skips itself when an extra is missing is a test that has
+# been quietly not running on every push while the count on the badge kept going up.
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5", "pytest-cov>=5.0", "numpy>=1.26"]
 
 [build-system]
 requires = ["hatchling"]

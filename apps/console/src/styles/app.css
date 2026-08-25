@@ -319,20 +319,128 @@
   .card p.sub { font-size: var(--t-xs); color: var(--fg-3); margin-block-end: var(--s-3); }
 
   /* ── call view ─────────────────────────────────────────────────────── */
-  .stage {
-    aspect-ratio: 16 / 9; border-radius: var(--r-lg); overflow: hidden; position: relative;
-    background: radial-gradient(120% 90% at 50% 0%, var(--surface-3), var(--bg));
-    border: 1px solid var(--line); display: grid; place-items: center;
+  /* The demo stage. Laid out like the page a prospect would actually land on -- headline,
+     a floating agent window, and a caption bubble -- rather than like a debugging surface.
+     The agent is the product here, so the product is what gets rendered. */
+  .demo {
+    position: relative; border-radius: var(--r-lg); border: 1px solid var(--line);
+    background: radial-gradient(130% 100% at 22% -10%, var(--surface-3), var(--bg) 62%);
+    min-block-size: 33rem; overflow: hidden; padding: var(--s-6);
+    display: grid; grid-template-rows: auto 1fr auto; gap: var(--s-4);
   }
-  .disclosure {
-    position: absolute; inset-block-start: var(--s-3); inset-inline-start: var(--s-3);
+  .demo[data-live="true"] { border-color: color-mix(in oklab, var(--agent) 40%, var(--line)); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: var(--s-2); justify-self: start;
+    padding: 5px var(--s-3); border-radius: var(--r-full);
+    background: var(--accent-wash); border: 1px solid color-mix(in oklab, var(--accent) 34%, transparent);
+    color: var(--accent); font-size: var(--t-xs); font-weight: 640;
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .pill i {
+    inline-size: 6px; block-size: 6px; border-radius: 50%; background: currentColor;
+    animation: pulse 2s var(--ease) infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
+
+  .hero { max-inline-size: 34ch; align-self: center; }
+  .hero h2 {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: clamp(2.25rem, 4.4vw, 3.5rem); line-height: 1.04; letter-spacing: -0.02em;
+    font-weight: 400; color: var(--fg);
+  }
+  .hero h2 span { color: var(--accent); }
+  .hero p { margin-block-start: var(--s-4); font-size: var(--t-lg); line-height: 1.5; color: var(--fg-2); }
+
+  .presenter { display: flex; align-items: center; gap: var(--s-3); margin-block-start: var(--s-5); }
+  .presenter-face {
+    inline-size: 44px; block-size: 44px; border-radius: 50%; overflow: hidden;
+    border: 1px solid var(--line-strong); background: var(--surface-3); display: grid; place-items: center;
+  }
+  .presenter-meta { display: grid; gap: 1px; }
+  .presenter-meta b { font-size: var(--t-sm); font-weight: 620; display: flex; align-items: center; gap: var(--s-2); }
+  .presenter-meta small { font-size: var(--t-xs); color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.08em; }
+  .live-dot { inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--won); }
+
+  /* The floating agent window. Sized like a picture-in-picture call rather than a hero image:
+     a face big enough to read expression, small enough that the page is still the subject. */
+  .pip {
+    position: absolute; inset-block-end: 7.5rem; inset-inline-end: var(--s-6);
+    inline-size: 15rem; aspect-ratio: 4 / 3.4; border-radius: var(--r-lg); overflow: hidden;
+    background: linear-gradient(170deg, var(--surface-3), var(--surface-1));
+    border: 1px solid var(--line-strong); box-shadow: var(--shadow-3);
+    display: grid; place-items: center;
+    transition: box-shadow var(--med), transform var(--med), border-color var(--med);
+  }
+  .pip[data-speaking="true"] {
+    border-color: color-mix(in oklab, var(--agent) 60%, transparent);
+    box-shadow: var(--shadow-3), 0 0 0 4px color-mix(in oklab, var(--agent) 16%, transparent);
+  }
+  .pip-name {
+    position: absolute; inset-block-end: var(--s-2); inset-inline-start: var(--s-2);
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px var(--s-2); border-radius: var(--r-sm);
+    background: rgb(0 0 0 / 0.55); backdrop-filter: blur(6px);
+    color: #fff; font-size: var(--t-xs); font-weight: 600;
+  }
+  .pip-menu {
+    position: absolute; inset-block-start: var(--s-2); inset-inline-end: var(--s-2);
+    inline-size: 26px; block-size: 26px; border-radius: 50%; display: grid; place-items: center;
+    background: rgb(255 255 255 / 0.14); backdrop-filter: blur(6px);
+    color: var(--fg-2); font-size: 13px; letter-spacing: 1px;
+  }
+
+  /* The caption bubble. Follows the AUDIO, not the token stream -- subtitles that run ahead of
+     the voice read as a bug even when both are correct. */
+  .caption {
+    /* Sized like a subtitle bar, not a tooltip. Shrink-to-fit made a three-word clause render
+       as a stray button floating mid-stage; a caption that changes shape on every clause is
+       more distracting than the words are useful. Fixed width, fixed height, text left. */
+    justify-self: start; align-self: end;
+    inline-size: min(68%, 62ch); min-block-size: 4.25rem;
+    padding: var(--s-3) var(--s-4); border-radius: var(--r-lg);
+    background: var(--surface-1); border: 1px solid var(--line);
+    box-shadow: var(--shadow-2); font-size: var(--t-lg); line-height: 1.5;
+    display: grid; align-items: center; transition: opacity var(--fast);
+  }
+  .caption[data-empty="true"] { color: var(--fg-3); font-size: var(--t-md); }
+
+  .composer { display: flex; gap: var(--s-2); align-items: center; }
+  .composer input {
+    flex: 1; padding: 11px var(--s-4); border-radius: var(--r-full);
+    background: var(--surface-1); border: 1px solid var(--line-strong); color: var(--fg);
+    font: inherit; font-size: var(--t-md); outline: none; transition: border-color var(--fast);
+  }
+  .composer input:focus { border-color: var(--accent); }
+  .composer input::placeholder { color: var(--fg-4); }
+
+  .talk {
     display: inline-flex; align-items: center; gap: var(--s-2);
-    padding: var(--s-1) var(--s-3); border-radius: var(--r-full);
-    background: color-mix(in oklab, var(--agent) 22%, transparent);
-    border: 1px solid color-mix(in oklab, var(--agent) 55%, transparent);
-    color: var(--fg); font-size: var(--t-xs); font-weight: 600;
-    backdrop-filter: blur(8px);
+    padding: 11px var(--s-4); border-radius: var(--r-full);
+    background: var(--surface-3); border: 1px solid var(--line-strong); color: var(--fg);
+    font: inherit; font-size: var(--t-sm); font-weight: 600; cursor: pointer;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+    transition: background var(--fast), border-color var(--fast), transform var(--fast);
   }
+  .talk:hover:not(:disabled) { background: var(--surface-4); }
+  .talk:disabled { opacity: 0.45; cursor: not-allowed; }
+  .talk[data-listening="true"] {
+    background: color-mix(in oklab, var(--lost) 20%, transparent);
+    border-color: var(--lost); color: var(--fg); transform: scale(0.98);
+  }
+  .talk[data-listening="true"] i {
+    inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--lost);
+    animation: pulse 1s var(--ease) infinite;
+  }
+
+  .engine-row { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+  .engine {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px var(--s-2);
+    border-radius: var(--r-sm); border: 1px solid var(--line);
+    background: var(--surface-2); font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-2);
+  }
+  .engine b { color: var(--fg); font-weight: 600; }
+  .engine[data-local="false"] { border-style: dashed; color: var(--fg-3); }
 
   .budget { display: flex; gap: 2px; block-size: 26px; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--line); }
   .budget i { display: grid; place-items: center; font-family: var(--mono); font-size: 10px; color: #fff; min-inline-size: 2px; }

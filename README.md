@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-145%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-201%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -25,7 +25,7 @@ Three things a sales team needs, built to work together:
 | Part | What it does |
 |---|---|
 | **Research** | Reads a company's public website and pulls out useful facts — how they price, what they use, who they are hiring |
-| **AI caller** | An animated agent that runs a video sales call, says it is AI up front, and hands over to a person when asked |
+| **AI caller** | An agent you can type to or talk to. It answers out loud, says it is AI up front, and hands over to a person when asked — running a language model and a voice on your own machine |
 | **Sales dashboard** | Where reps track their deals — **and it works with no internet at all** |
 
 ---
@@ -67,11 +67,27 @@ npm run dev            # http://localhost:5173
 
 Then **turn off your wifi and keep working.** That is the demo.
 
-Optional, and both work without them:
+### Giving her the local brain and voice
+
+The call works without this — she answers from a grounded script and the browser speaks. For the
+real thing:
+
+```bash
+pip install -e "services/api[voice]"      # the voice: ~40MB of wheels
+python scripts/fetch-models.py            # its weights: 330MB, Apache-2.0, no account
+
+pip install -e "services/api[brain]"      # the model: torch, ~2.5GB
+# Qwen2.5-1.5B-Instruct downloads itself on first start
+```
+
+Restart the API and `/api/calls/health` will say what loaded. So will the console.
+
+Optional, and everything works without them:
 
 ```bash
 FIRECRAWL_API_KEY=fc-…     # use the real research API instead of the built-in browser
 OUR_CATEGORY="vector search,learning-to-rank"   # rank job posts mentioning these highest
+RAINMAKER_VOICE=browser    # force the fallback voice, to hear the difference
 ```
 
 ---
@@ -161,27 +177,43 @@ and the page limit counts *attempts* rather than successes.
 
 ## The AI caller
 
-<img src="docs/img/call.png" alt="Live call view with per-stage latency budget" width="100%">
+<img src="docs/img/call.png" alt="Live call: the agent mid-reply, with the per-stage latency budget" width="100%">
 
-In conversation, people tolerate about 300 milliseconds of silence. Past about 800, a pause stops
+**Type to her, or hold the talk button and speak. She answers out loud either way.** The reply
+above came out of a 1.5-billion-parameter model on the laptop that took the screenshot, and the
+voice is a 330MB synthesiser running on its CPU. Nothing left the machine.
+
+| Part | What runs | Where |
+|---|---|---|
+| Thinking | **Qwen2.5-1.5B-Instruct**, streamed token by token | your GPU, or your CPU |
+| Speaking | **Kokoro-82M**, synthesised clause by clause | your CPU |
+| Hearing | the browser's own speech recognition | the browser |
+
+The first two are optional. Without them the agent still holds a conversation — it answers from
+a small grounded script and the browser speaks the words — and the console's engine badge says
+which of the two it is, because a demo that has quietly degraded and does not mention it is how
+a reviewer concludes the product always sounded like that.
+
+### Why it does not pause awkwardly
+
+In conversation people tolerate about 300 milliseconds of silence. Past about 800, a pause stops
 sounding like thinking and starts sounding broken.
 
-Getting under that means every stage starts working on the **first piece** of the previous
-stage's output instead of waiting for all of it:
+The trick is that **nothing waits for the previous thing to finish**. Synthesis starts on the
+first few words of the reply rather than the first sentence, and the audio for clause two is
+produced while clause one is still playing. Measured on the same 175-character reply:
 
-| Stage | If you wait | If you stream | Budget |
-|---|---:|---:|---:|
-| Noticing they stopped talking | 250ms | 250ms | 250ms |
-| Converting speech to text | 400ms | 60ms | 80ms |
-| AI's first word | 700ms | 220ms | 250ms |
-| First audio out | 350ms | 70ms | 100ms |
-| Moving the mouth | 120ms | 30ms | 40ms |
-| **Total** | **~1820ms** | **~630ms** | **720ms** |
+| | Silence before the first sound |
+|---|---:|
+| Synthesise the whole reply, then play it | 3007ms |
+| Synthesise the first clause first | **407ms** |
 
-Starting the voice on the first **clause** rather than waiting for a full sentence saves about
-200ms — a quarter of the whole budget.
+Fifteen real turns on that laptop: **850ms median** from pressing send to hearing her, of which
+the model is ~140ms and the voice ~720ms. The console shows the breakdown per turn, so when it
+goes over budget you can see which stage spent it. On this hardware it usually does go slightly
+over, and synthesis is why — see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-### It always says it is an AI
+### Two things it will not do
 
 ```python
 Disclosure(required=False)
@@ -189,46 +221,29 @@ Disclosure(required=False)
 #                  to, that is a legal question, not a configuration one.
 ```
 
-An AI face on a sales call that does not admit it is an AI is the mistake that ends a company.
-Making it impossible to switch off is cheaper than making it a setting somebody eventually
-switches off.
+An AI on a sales call that does not admit it is an AI is the mistake that ends a company. Making
+it impossible to switch off is cheaper than making it a setting somebody eventually switches off.
 
----
+The second is the handoff. **Ask for a human and she stops selling immediately** — one fixed
+line, and the model is never consulted about whether to agree. Asking a small model to abandon
+its objective on request is a bet, and the stake is the worst thing this product can do.
 
-## The animated face
+She is also held to two sentences per turn, in code rather than in the prompt. Asked politely,
+the model wrote four to six every time and got cut off mid-word by the token limit.
 
-Everything is open source and can be self-hosted. Paid alternatives plug into the same interface.
+### The face
 
-| Part | Using | Why |
-|---|---|---|
-| Mouth movement | **MuseTalk** | The only open-source option fast enough for live video |
-| Idle movement | **LivePortrait** | Stops it looking like a frozen mannequin while listening |
-| Voice | **Kokoro-82M** | Speed matters more than perfection here, and it is free |
-| Hearing | **faster-whisper** | Runs live on a GPU, costs nothing per call |
-| Knowing when you stopped | **Silero** + sentence checking | Interrupting badly makes it obviously fake |
-| Video connection | **LiveKit** | Handles reconnects and bad networks |
-
-**What actually ships is a drawn face**, not a photo-realistic one. It uses the same pipeline a
-photo-realistic system would:
-
-```
-audio ──► which mouth shape ──► draw the frame
-```
-
-Only the last step differs — drawn shapes instead of AI-generated pixels. Everything before it
-is the real thing, and it is the part that decides whether a face looks alive.
-
-What sells it is not the mouth. It is **irregular blinking** (a steady blink is instantly
-robotic), constant small movement, eyes that drift and return to the camera, eyebrows lifting on
-emphasised words, and a listening pose with slower blinking so she never freezes between
-sentences.
+**What ships is a drawn face**, not a photo-realistic one, and it moves to the audio that is
+actually playing — the mouth shapes come from the clause being spoken and stop when the sound
+does. What sells it is not the mouth: it is irregular blinking, constant small movement, eyes
+that drift and return, and a listening pose so she never freezes between sentences.
 
 > [!IMPORTANT]
-> **What is tested and what is not.** The call handling, timing, disclosure, offline syncing,
-> research, dashboard and the drawn face are all built and running — that screenshot is the live
-> system mid-sentence. The **photo-realistic** option is wired up behind the same interface but
-> **has not been run end to end here**: it needs several gigabytes of model weights and a
-> dedicated GPU. Claiming otherwise would fall apart in the first interview question.
+> **What is running and what is not.** The conversation, the voice, the timing, the disclosure,
+> the handoff, the syncing, the research and the dashboard are all built and running — that
+> screenshot is the live system mid-sentence, and the numbers above came off the wire. A
+> **photo-realistic** face (MuseTalk over LivePortrait) is wired up behind the same interface
+> but **has not been run here**: it needs several gigabytes of weights and a dedicated GPU.
 
 ---
 
@@ -251,10 +266,11 @@ sentences.
 
 ```bash
 npm test                       # 47 tests — syncing and text editing
-pytest                         # 98 tests — research, syncing, the API, the call pipeline
+pytest                         # 154 tests — research, syncing, the API, the live call
 ```
 
-145 tests in total, and 84% of the Python source covered.
+201 tests in total. None of them load a language model: a test that spends six seconds on
+Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
 |---|---|
@@ -264,6 +280,8 @@ pytest                         # 98 tests — research, syncing, the API, the ca
 | `test_sync.py` | Duplicate changes, saving before broadcasting, slow clients, and TypeScript ↔ Python agreement |
 | `test_app.py` | **The offline flush endpoint.** Reconnect, retry, deduplicate, and never half-apply a batch |
 | `test_pipeline.py` | That a call cannot start without the AI disclosure, and that every stage of the turn is measured |
+| `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
+| `test_readme.py` | That these counts are the counts. A badge is an image, and nobody proofreads an image |
 
 ### The bug the API tests found immediately
 

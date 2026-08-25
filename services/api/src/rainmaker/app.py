@@ -1,11 +1,11 @@
 """The Rainmaker API.
 
-Three surfaces, one process:
+Four surfaces, one process:
 
     /api/research     prospect enrichment (the browser agent)
     /api/sync         the CRDT relay: POST to append, WS to stream
     /api/deals        materialised pipeline views, derived from the op log
-    /api/calls        call records, disclosure log, latency budgets
+    /api/calls        the live call: WS for the conversation, GET for which engines are loaded
 
 The console never talks to /api/deals to WRITE. Every mutation goes through the op log so the
 offline path and the online path are the same path — a write that only works when connected is
@@ -15,9 +15,13 @@ divergence lives.
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import contextlib
 import logging
 import os
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -27,6 +31,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .calls.pipeline import (
+    TURN_BUDGET_MS,
+    CallPipeline,
+    Disclosure,
+    Finished,
+    Heard,
+    LanguageModel,
+    Spoke,
+    TextToSpeech,
+    Thought,
+)
+from .calls.providers import (
+    ClientSpeechToText,
+    build_language_model,
+    build_voice,
+    engines,
+)
+from .calls.session import CallSession, Prospect, facts_from_enrichment
 from .research import ResearchAgent, ResearchConfig, ResearchRequest, build_fetcher
 from .sync.hub import SyncHub
 from .sync.oplog import OpLog
@@ -41,9 +63,33 @@ class AppState:
     oplog: OpLog
     hub: SyncHub
     agent: ResearchAgent
+    llm: LanguageModel
+    tts: TextToSpeech
 
 
 state = AppState()
+
+
+async def _warm_engines() -> None:
+    """Load the model and the voice in the background, once, at startup.
+
+    NOT ON THE FIRST TURN. Loading Qwen takes about four seconds and Kokoro about one and a
+    half, and a lazily-loaded engine spends both of them on the first prospect of the day —
+    the worst available place, and invisible in any average. Doing it here instead means the
+    server answers `/api/calls/health` immediately and reports `ready: false` until the weights
+    are in, which is what the console's engine badge shows.
+
+    Off the event loop, because both loads are blocking and the console must be able to
+    connect while they run.
+    """
+    for engine in (state.llm, state.tts):
+        load = getattr(engine, "load", None)
+        if load is None or not getattr(engine, "available", False):
+            continue
+        try:
+            await asyncio.to_thread(load)
+        except Exception:  # noqa: BLE001 — a missing engine degrades, it does not crash
+            log.exception("failed to load %s; falling back", getattr(engine, "name", engine))
 
 
 @asynccontextmanager
@@ -52,6 +98,10 @@ async def lifespan(app: FastAPI):
     state.oplog = OpLog(DATA_DIR / "oplog.sqlite3")
     state.oplog.ensure_workspace(DEFAULT_WORKSPACE, "Demo workspace")
     state.hub = SyncHub(state.oplog)
+
+    state.llm = build_language_model(os.environ.get("RAINMAKER_BRAIN", "auto"))
+    state.tts = build_voice(os.environ.get("RAINMAKER_VOICE", "auto"))
+    warming = asyncio.create_task(_warm_engines())
 
     key = os.environ.get("FIRECRAWL_API_KEY", "").strip()
     backend = os.environ.get("RESEARCH_BACKEND", "auto")
@@ -66,10 +116,18 @@ async def lifespan(app: FastAPI):
             ),
         ),
     )
-    log.info("rainmaker api up | research backend=%s", state.agent.pool.fetcher.name)
+    log.info(
+        "rainmaker api up | research=%s brain=%s voice=%s",
+        state.agent.pool.fetcher.name,
+        getattr(state.llm, "name", "?"),
+        getattr(state.tts, "name", "?"),
+    )
     try:
         yield
     finally:
+        warming.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await warming
         await state.agent.close()
         state.oplog.close()
 
@@ -184,8 +242,6 @@ def create_app() -> FastAPI:
                 while True:
                     await ws.send_json(await sub.queue.get())
 
-            import asyncio
-
             pump_task = asyncio.create_task(pump())
             try:
                 while True:
@@ -212,6 +268,155 @@ def create_app() -> FastAPI:
             "actors": state.hub.presence(workspace),
             "live": state.hub.live_count(workspace),
         }
+
+    # ─────────────────────────────────────────────────────────── the live call
+    @app.get("/api/calls/health")
+    async def call_health() -> dict[str, Any]:
+        """Which engines are actually loaded.
+
+        The console shows this rather than assuming. A demo that has quietly fallen back to the
+        browser voice and says nothing about it is how a reviewer concludes the product sounds
+        like that.
+        """
+        return {
+            "engines": engines(state.llm, state.tts),
+            "disclosure": Disclosure().spoken,
+            "budget_ms": TURN_BUDGET_MS,
+        }
+
+    @app.websocket("/api/calls/ws")
+    async def call_ws(ws: WebSocket) -> None:
+        """One call per socket.
+
+        THE PROTOCOL IS DELIBERATELY SMALL. In: `start`, `say`, `stop`. Out: `disclosure`,
+        `heard`, `token`, `clip`, `budget`, `done`. Audio goes out as base64 WAV inside the JSON
+        rather than on a binary frame — a second channel would need its own ordering and its own
+        reconnect logic to keep clips in sequence with the captions they belong to, and this
+        stream is a few hundred kilobytes a minute.
+
+        `say` carries the prospect's words whether they typed them or spoke them, plus the two
+        latency stages only the client can measure. See `LatencyBudget.adopt`.
+        """
+        await ws.accept()
+
+        stt = ClientSpeechToText()
+        pipeline = CallPipeline(stt=stt, llm=state.llm, tts=state.tts)
+        session = CallSession(
+            pipeline,
+            stt,
+            prospect=Prospect(
+                company=ws.query_params.get("company", ""),
+                domain=ws.query_params.get("domain", ""),
+            ),
+        )
+
+        async def send_events(events: AsyncIterator[Any]) -> None:
+            async for event in events:
+                if isinstance(event, Heard):
+                    await ws.send_json(
+                        {"type": "heard", "text": event.text, "final": event.final}
+                    )
+                elif isinstance(event, Thought):
+                    await ws.send_json({"type": "token", "text": event.token})
+                elif isinstance(event, Spoke):
+                    await ws.send_json(
+                        {
+                            "type": "clip",
+                            "index": event.clip.index,
+                            "text": event.clip.text,
+                            "duration_ms": round(event.clip.duration_ms, 1),
+                            "generate_ms": round(event.clip.generate_ms, 1),
+                            # Empty when there is no local voice; the client then speaks the
+                            # text itself rather than playing silence.
+                            "wav": base64.b64encode(event.clip.wav).decode()
+                            if event.clip.wav
+                            else "",
+                            "browser_voice": event.clip.browser_voice,
+                        }
+                    )
+                elif isinstance(event, Finished):
+                    await ws.send_json(
+                        {
+                            "type": "done",
+                            "response": event.result.response.strip(),
+                            "budget": event.result.budget.report(),
+                            "handoff": event.result.handoff_requested,
+                        }
+                    )
+
+        turn: asyncio.Task | None = None
+        try:
+            while True:
+                message = await ws.receive_json()
+                kind = message.get("type")
+
+                if kind == "brief":
+                    # The console already has the research result on screen, so it sends that
+                    # rather than making the agent re-fetch a site it just read.
+                    #
+                    # THE CLIENT THEREFORE DECIDES WHAT THE AGENT MAY CLAIM, which is acceptable
+                    # here — one console, one operator — and would not be in a deployment where
+                    # the prospect can reach the socket. There the brief is looked up server-side
+                    # from the deal, and this message does not exist.
+                    enrichment = message.get("enrichment") or {}
+                    session.prospect = Prospect(
+                        company=message.get("company") or session.prospect.company,
+                        domain=message.get("domain") or session.prospect.domain,
+                        facts=facts_from_enrichment(enrichment) if enrichment else [],
+                    )
+                    await ws.send_json(
+                        {"type": "briefed", "facts": len(session.prospect.facts)}
+                    )
+
+                elif kind == "start":
+                    await ws.send_json(
+                        {
+                            "type": "disclosure",
+                            "text": session.pipeline.disclosure.spoken,
+                            "engines": engines(state.llm, state.tts),
+                        }
+                    )
+                    turn = asyncio.create_task(send_events(session.open()))
+
+                elif kind == "say":
+                    # BARGE-IN. A prospect who starts talking over the agent has stopped
+                    # listening, and an agent that finishes its sentence anyway is the single
+                    # most robotic thing it can do. Cancelling here also frees the GPU for the
+                    # turn they actually want answered.
+                    if turn and not turn.done():
+                        turn.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await turn
+                        await ws.send_json({"type": "interrupted"})
+                    # THE CLIENT OWNS THESE TWO NUMBERS. `stt_ms` is the browser recogniser's
+                    # own cost — endpointing and transcription together, which it does not
+                    # separate — and it is absent when the prospect typed, because then nothing
+                    # was transcribed. `avatar_ms` is audio-in-hand to first frame drawn.
+                    hints = {
+                        stage: float(message[key])
+                        for stage, key in (("stt", "stt_ms"), ("avatar", "avatar_ms"))
+                        if isinstance(message.get(key), int | float)
+                    }
+                    turn = asyncio.create_task(
+                        send_events(
+                            session.respond(message.get("text", ""), budget_hints=hints)
+                        )
+                    )
+
+                elif kind == "stop":
+                    if turn and not turn.done():
+                        turn.cancel()
+                    await ws.send_json({"type": "stopped"})
+
+                elif kind == "ping":
+                    await ws.send_json({"type": "pong"})
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            log.warning("call ws error: %s", exc)
+        finally:
+            if turn and not turn.done():
+                turn.cancel()
 
     # ─────────────────────────────────────────────────────────── deals (read-only)
     @app.get("/api/deals")

@@ -21,7 +21,12 @@ const BASE = process.argv.includes("--base")
 
 mkdirSync(OUT, { recursive: true });
 
-const browser = await chromium.launch();
+// Audio must actually play for the call shot: the mouth is driven by clips coming out of the
+// Web Audio graph, so a suspended AudioContext would produce a screenshot of a static face and
+// no indication that anything was wrong.
+const browser = await chromium.launch({
+  args: ["--autoplay-policy=no-user-gesture-required", "--use-fake-ui-for-media-stream"],
+});
 const ctx = await browser.newContext({
   viewport: { width: 1500, height: 980 },
   deviceScaleFactor: 2,
@@ -62,15 +67,28 @@ await shot("call", async (p) => {
   await setTheme("dark");
   await p.click('.nav button:has-text("Live call")');
   await p.click('button:has-text("Start call")');
-  // Let the transcript and the latency strip fill in.
-  await p.waitForTimeout(9500);
-  // Then wait for a GOOD FRAME rather than sleeping and hoping: she must be speaking, on an
-  // open viseme, and not mid-blink. Sleeping caught her blinking on a closed mouth twice,
-  // which made a working rig look static in the one image people actually look at.
+
+  // The disclosure is a real turn now, so wait for it to finish arriving rather than sleeping.
+  await p.waitForSelector('.turn:has-text("not a human")', { timeout: 20000 });
+
+  // Then ask something, so the shot shows a reply the model actually produced. The engines may
+  // still be loading on a cold server -- the reply can take a few seconds and that is honest.
+  await p.fill(".composer input", "We already run Postgres, why would we need you?");
+  await p.click('button:has-text("Send")');
+
+  // The latency strip only exists once the turn reports `done`, and audio keeps playing for a
+  // second or two after that -- so wait for the strip FIRST and the mouth second. Waiting only
+  // for the mouth caught the frame before the reply landed, and published a screenshot of the
+  // instrument panel saying "say something to see where the time went" during a reply.
+  await p.waitForSelector(".budget", { timeout: 45000 });
+
+  // Then wait for a GOOD FRAME rather than sleeping and hoping: she must be speaking, on an open
+  // viseme, and not mid-blink. Sleeping caught her blinking on a closed mouth twice, which made
+  // a working rig look static in the one image people actually look at.
   await p
     .waitForFunction(
       () => {
-        const el = document.querySelector("svg[data-speaking]");
+        const el = document.querySelector(".pip svg[data-speaking]");
         return (
           el?.getAttribute("data-speaking") === "true" &&
           el.getAttribute("data-blink") === "false" &&
@@ -78,7 +96,7 @@ await shot("call", async (p) => {
         );
       },
       null,
-      { timeout: 8000, polling: 30 },
+      { timeout: 45000, polling: 30 },
     )
     .catch(() => console.warn("no open-mouth frame captured within the window"));
 }, 0);
