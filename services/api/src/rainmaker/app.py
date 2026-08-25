@@ -74,6 +74,34 @@ async def lifespan(app: FastAPI):
         state.oplog.close()
 
 
+class AppendRequest(BaseModel):
+    """The body of an offline flush.
+
+    AT MODULE SCOPE, AND IT HAS TO BE. This was declared inside `create_app`, and with
+    `from __future__ import annotations` at the top of this file every annotation is a string that
+    FastAPI resolves against the MODULE's globals. A class defined in a function body is not in
+    them, so the lookup failed, `req` fell back to being treated as a query parameter, and every
+    POST to /api/sync/append answered:
+
+        422  {"detail":[{"type":"missing","loc":["query","req"],"msg":"Field required"}]}
+
+    The endpoint could not accept a body at all.
+
+    WHY NOBODY NOTICED. The console reaches for this path only when the WebSocket is unavailable
+    -- see apps/console/src/lib/store.ts, "it works in situations the WebSocket does not (some
+    corporate proxies)" -- and its failure handling is deliberately silent: ops stay in the outbox
+    and retry, because from the user's point of view the write already succeeded locally. So on
+    exactly the networks this fallback exists to serve, nothing ever synced and no one was told.
+
+    `/api/research` was never affected: `ResearchRequest` is imported at module scope, so its
+    annotation always resolved.
+    """
+
+    workspace: str = DEFAULT_WORKSPACE
+    ops: list[dict[str, Any]] = Field(default_factory=list)
+    client_id: str | None = None
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Rainmaker",
@@ -113,11 +141,6 @@ def create_app() -> FastAPI:
         return JSONResponse(payload)
 
     # ─────────────────────────────────────────────────────────── sync
-    class AppendRequest(BaseModel):
-        workspace: str = DEFAULT_WORKSPACE
-        ops: list[dict[str, Any]] = Field(default_factory=list)
-        client_id: str | None = None
-
     @app.post("/api/sync/append")
     async def append(req: AppendRequest) -> dict[str, Any]:
         """The offline flush path.

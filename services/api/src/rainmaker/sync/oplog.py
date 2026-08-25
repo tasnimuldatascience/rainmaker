@@ -85,6 +85,12 @@ class StoredOp:
         return {**self.payload, "_seq": self.seq}
 
 
+#: Every column OpLog's insert reads out of an op. Kept beside the writer rather than in the
+#: schema module because this is the list the validation pass has to agree with, and the two
+#: drifting apart is how a "validated" op still raises on insert.
+_REQUIRED = frozenset({"id", "actor", "kind", "entityId", "type", "ts"})
+
+
 class OpLog:
     """Append-only op store. Thread-safe; one connection guarded by a lock."""
 
@@ -116,6 +122,21 @@ class OpLog:
         Returning only the NEW ops is what makes the broadcast correct: relaying a duplicate
         to every connected client turns one client's retry storm into everyone's.
         """
+        # VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. The insert loop used to raise partway
+        # through on the first malformed op, which left the good ops before it committed and
+        # still answered the client 422. That combination is the worst of both: the console does
+        # `if (!res.ok) throw`, keeps the whole batch queued, and retries -- so the batch fails
+        # forever on the same bad op while the good ones dedupe, the outbox never drains, and
+        # nothing surfaces to the user because a queued write already looks successful to them.
+        #
+        # One poison op should reject its batch, not half-apply it.
+        for op in ops:
+            missing = _REQUIRED - op.keys()
+            if missing:
+                raise ValueError(f"malformed op, missing {sorted(missing)[0]!r}")
+            if not isinstance(op.get("ts"), dict) or not {"wall", "counter"} <= op["ts"].keys():
+                raise ValueError("malformed op, missing 'ts.wall' or 'ts.counter'")
+
         stored: list[StoredOp] = []
         now = datetime.now(UTC).isoformat()
         with self._lock:

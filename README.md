@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-106%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-145%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -251,8 +251,10 @@ sentences.
 
 ```bash
 npm test                       # 47 tests — syncing and text editing
-pytest                         # 59 tests — research, syncing, cross-language agreement
+pytest                         # 98 tests — research, syncing, the API, the call pipeline
 ```
+
+145 tests in total, and 84% of the Python source covered.
 
 | Test file | What it protects |
 |---|---|
@@ -260,6 +262,37 @@ pytest                         # 59 tests — research, syncing, cross-language 
 | `diff.test.ts` | Typing in a shared note produces the right text, including emoji and accents |
 | `test_research.py` | The research agent cannot invent facts, wander onto other websites, or read more pages than allowed |
 | `test_sync.py` | Duplicate changes, saving before broadcasting, slow clients, and TypeScript ↔ Python agreement |
+| `test_app.py` | **The offline flush endpoint.** Reconnect, retry, deduplicate, and never half-apply a batch |
+| `test_pipeline.py` | That a call cannot start without the AI disclosure, and that every stage of the turn is measured |
+
+### The bug the API tests found immediately
+
+`/api/sync/append` — the path a console uses to flush its offline queue — **could not accept a
+request body at all.** Every POST returned:
+
+```json
+422  {"detail":[{"type":"missing","loc":["query","req"],"msg":"Field required"}]}
+```
+
+The request model was declared inside `create_app()`. With `from __future__ import annotations`
+every annotation is a string that FastAPI resolves against the *module's* globals, and a class
+defined in a function body is not in them — so the parameter silently degraded to a query
+parameter.
+
+**It went unnoticed because its failure is silent by design.** The console only reaches for this
+path when the WebSocket is unavailable — *"it works in situations the WebSocket does not (some
+corporate proxies)"* — and a failed flush leaves the ops queued for retry rather than surfacing an
+error, because from the user's point of view the write already succeeded locally. So on exactly
+the networks the fallback exists to serve, nothing ever synced and nobody was told.
+
+The endpoint had no tests. It now has eleven.
+
+### And one it found on the second look
+
+A batch containing one malformed op was rejected with 422 *after* persisting the good ops before
+it. The console retries the whole batch on failure, so the bad op failed forever while the good
+ones deduplicated: the outbox never drained, and still nothing surfaced. Ops are validated in full
+before anything is written now — one poison op rejects its batch rather than half-applying it.
 
 ### A bug that convergence testing could not find
 

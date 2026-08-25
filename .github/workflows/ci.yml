@@ -16,6 +16,9 @@ jobs:
       - run: npx tsc --noEmit -p packages/crdt/tsconfig.json
       - run: npx tsc --noEmit -p apps/console/tsconfig.json
       - run: npx vitest run --root packages/crdt
+      # The console's own suite was type-checked and built by this job but never RUN, so its 24
+      # tests could fail for a fortnight without anybody hearing about it.
+      - run: npx vitest run --root apps/console
       - run: npm run build -w @rainmaker/console
 
   api:
