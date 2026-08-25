@@ -49,7 +49,7 @@ export interface Engines {
 export interface CallState {
   phase: CallPhase;
   turns: Turn[];
-  /** What the agent is saying right now — the caption bubble, one clause at a time. */
+  /** What the agent has said so far this turn — the caption bubble, built clause by clause. */
   caption: string;
   /** True only while audio is actually coming out. Drives the mouth. */
   speaking: boolean;
@@ -128,6 +128,8 @@ export class LiveCall {
   private listeners = new Set<(state: CallState) => void>();
   private state: CallState = { ...IDLE, micSupported: recognitionCtor() !== null };
 
+  /** The clauses spoken so far in the current turn, joined to make the caption. */
+  private captionParts: string[] = [];
   /** Set when a turn's first clip arrives; cleared once the face has moved. */
   private clipArrivedAt: number | null = null;
   private avatarMs: number | null = null;
@@ -178,6 +180,7 @@ export class LiveCall {
       return;
     }
 
+    this.captionParts = [];
     if (brief) socket.send(JSON.stringify({ type: "brief", ...brief }));
     socket.send(JSON.stringify({ type: "start" }));
     this.set({ phase: "greeting" });
@@ -242,6 +245,7 @@ export class LiveCall {
     this.stopAudio();
 
     this.pushTurn({ who: "prospect", text: trimmed });
+    this.captionParts = [];
     this.set({ phase: "thinking", partial: "", caption: "" });
     this.socket.send(
       JSON.stringify({
@@ -385,7 +389,13 @@ export class LiveCall {
       this.avatarMs = performance.now() - this.clipArrivedAt;
       this.clipArrivedAt = null;
     }
-    this.set({ caption: text, speaking: true, phase: "speaking" });
+    // THE CAPTION ACCUMULATES ACROSS THE TURN rather than being replaced per clip. Clips are
+    // cut for synthesis latency, not for reading: the first one is a dozen characters, so a
+    // caption that showed only the clip currently playing rendered "me bring someone" on its
+    // own — a fragment that is correct, is in sync with the audio, and reads as broken.
+    // Appending keeps it in sync AND leaves a whole sentence on screen.
+    this.captionParts.push(text);
+    this.set({ caption: this.captionParts.join(" "), speaking: true, phase: "speaking" });
   }
 
   private mouthOff(): void {
@@ -418,6 +428,7 @@ export class LiveCall {
     this.timers = [];
     this.nextStart = this.ctx ? this.ctx.currentTime : 0;
     if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
+    this.captionParts = [];
     this.set({ speaking: false, caption: "" });
   }
 
