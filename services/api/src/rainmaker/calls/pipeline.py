@@ -35,10 +35,14 @@ another dependency and another install step, and this repository's rule is that 
 
 WHAT IS VERIFIED AND WHAT IS NOT — stated here rather than discovered by a reader: the
 orchestration, budget accounting, disclosure enforcement and both local engines are implemented,
-tested, and run end to end; the numbers above came out of that path. The face is the exception
-and `calls/avatar.py` carries that argument in full — a photoreal still lit by the real output
-level is the default, hosted lip-sync is a key away and has not been run here, and MuseTalk was
-tried and does not run on this hardware at all.
+tested, and run end to end; the numbers above came out of that path. The face too: a photoreal
+synthetic portrait whose mouth is generated from the audio being played, by Wav2Lip on the local
+GPU — see `calls/lipsync.py`, and `calls/avatar.py` for what it degrades to without the
+checkpoint and why MuseTalk was tried and rejected.
+
+The face is deliberately OUTSIDE the budget above. Frames follow their audio rather than
+delaying it, so generating them cannot make a turn slower; the worst it can do is have her mouth
+join a beat into the first clause.
 """
 
 from __future__ import annotations

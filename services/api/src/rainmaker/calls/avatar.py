@@ -3,29 +3,30 @@
 THREE FACES, ONE INTERFACE. `pipeline.Avatar` takes audio and returns frames; everything below
 implements it, and which one is running is reported by `/api/calls/health` rather than assumed.
 
-    PortraitAvatar   the default. A photoreal synthetic portrait, lit and moved by the real
-                     output loudness. No GPU, no key, no weights. Does not fake a mouth.
+    PortraitAvatar   the default. A photoreal synthetic portrait. With the Wav2Lip checkpoint
+                     installed her mouth is generated from the audio she is saying; without it
+                     the photograph is still and lit by the output level, and says so.
     HostedAvatar     a streaming avatar service. Real lip-sync on a real-looking face. Needs
                      an account and a key, so it is off unless one is configured.
     PlaceholderAvatar the vector rig in `pipeline.py`, kept as the last fallback.
 
-WHY THE DEFAULT DOES NOT MOVE HER LIPS, since that is the obvious thing to build and the reason
-not to is worth writing down. Warping the mouth of a 512-pixel still is guesswork: the image
-contains no information about teeth, tongue or the inside of the mouth, so any opening has to be
-invented. The uncanny valley is steepest exactly there — a face that is nearly right and moves
-slightly wrong reads as a corpse, while the SAME face holding still reads as a video call with a
-frozen frame, which people see every day and think nothing of. So the local face moves only in
-ways that are true: it brightens and blooms with the actual RMS of the audio playing at that
-instant, and drifts on a slow camera path. Nothing claims to be lip movement, so nothing is
-wrong.
+HER MOUTH IS GENERATED, NOT WARPED, and the difference is the whole argument. Stretching the lips
+of a still is guesswork — the image holds no information about teeth or tongue, so any opening
+has to be invented, and a nearly-right face moving slightly wrong reads as a corpse. So nothing
+here invents: `lipsync.py` runs Wav2Lip on the local GPU against the exact audio being played,
+and when it is not installed the photograph simply holds still and `describe()` says so. What is
+never done is faking the difference.
 
-WHAT WAS TRIED AND REJECTED: MuseTalk, which is the right answer and does not run here. It pins
+WHAT WAS TRIED AND REJECTED: MuseTalk, which is the better model and does not run here. It pins
 `torch 2.0.1+cu118`, whose newest supported architecture is `sm_90`; this machine's GPU is
 `sm_120`, so that build has no GPU at all — not a slower GPU, none. It also needs mmcv, mmdet
 and mmpose compiled from source, which on Windows means a full MSVC and CUDA toolchain. And its
 own README's laptop datapoint is five minutes of compute for eight seconds of video, on a card
-that is not simultaneously hosting a language model. It is documented here rather than left as
-an adapter nobody can run.
+that is not simultaneously hosting a language model.
+
+Wav2Lip is older and lighter and gets there: no mmcv, one checkpoint, and seventeen times
+realtime once warm, because there is one photograph rather than a video and the face crop is
+therefore computed once instead of per frame.
 """
 
 from __future__ import annotations
@@ -88,19 +89,27 @@ class PortraitAvatar(Avatar):
     name = "portrait"
     realtime = True
 
-    def __init__(self, portrait: str = PORTRAIT_PATH):
+    def __init__(self, portrait: str = PORTRAIT_PATH, lipsync: Any = None):
         self.portrait = portrait
+        #: The generator, when one is loaded. `describe()` reports what is actually true rather
+        #: than a constant, because "is her mouth moving" is a question the console answers with
+        #: a badge and a reader will check it against the screen.
+        self.lipsync = lipsync
 
     def describe(self) -> FaceDescription:
+        synced = bool(self.lipsync is not None and getattr(self.lipsync, "ready", False))
         return FaceDescription(
             kind="portrait",
-            label="Photoreal still, audio-lit",
+            label="Photoreal, Wav2Lip" if synced else "Photoreal still, audio-lit",
             portrait=self.portrait,
             synthetic=True,
-            lip_synced=False,
+            lip_synced=synced,
             note=(
-                "A generated face of no real person. It brightens and moves with the real "
-                "output level; it does not pretend to lip-sync."
+                "A generated face of no real person, with her mouth generated from the audio "
+                "she is saying."
+                if synced
+                else "A generated face of no real person. The photograph is still: install the "
+                "Wav2Lip checkpoint with scripts/fetch-lipsync.py to make her mouth move."
             ),
         )
 

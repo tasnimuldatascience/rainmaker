@@ -182,6 +182,15 @@ export class LiveCall {
   private listeners = new Set<(state: CallState) => void>();
   private state: CallState = { ...IDLE, micSupported: recognitionCtor() !== null };
 
+  /**
+   * Decoded mouth frames per clip, and when that clip starts on the audio clock.
+   *
+   * Keyed by clip index because the frames arrive AFTER their audio — see `send_mouth` on the
+   * server. By the time they land the clip may already be playing, or finished, and both are
+   * handled by seeking on the clock rather than by playing from frame zero.
+   */
+  private mouths = new Map<number, { frames: ImageBitmap[]; fps: number }>();
+  private clipStarts = new Map<number, number>();
   /** The clauses spoken so far in the current turn, joined to make the caption. */
   private captionParts: string[] = [];
   /** Set when a turn's first clip arrives; cleared once the face has moved. */
@@ -315,6 +324,10 @@ export class LiveCall {
 
       case "clip":
         this.play(message as unknown as ClipMessage);
+        break;
+
+      case "mouth":
+        void this.acceptMouth(message as unknown as MouthMessage);
         break;
 
       case "done": {
@@ -484,6 +497,48 @@ export class LiveCall {
     return this.smoothed;
   }
 
+  /**
+   * Take delivery of a clip's mouth frames and decode them off the main thread.
+   *
+   * `createImageBitmap` rather than `<img>` elements: decoding twenty-five JPEGs a second on the
+   * main thread while a call is running drops frames in the rest of the UI, and a bitmap can be
+   * handed straight to `drawImage` with no further work.
+   */
+  private async acceptMouth(message: MouthMessage): Promise<void> {
+    try {
+      const bitmaps = await Promise.all(
+        message.frames.map(async (data) => {
+          const bytes = base64ToBytes(data);
+          return createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
+        }),
+      );
+      this.mouths.set(message.index, { frames: bitmaps, fps: message.fps || 25 });
+    } catch {
+      // A clip without a mouth is a still face for a second. Not worth failing a call over.
+    }
+  }
+
+  /**
+   * The mouth frame for this instant, or null when there is nothing to show.
+   *
+   * Read on the face's own animation frame, like `level()`. Seeks by the audio clock rather
+   * than counting frames, so frames that arrived late are skipped rather than played behind.
+   */
+  mouthFrame(): ImageBitmap | null {
+    if (!this.ctx || this.mouths.size === 0) return null;
+    const now = this.ctx.currentTime;
+
+    for (const [index, mouth] of this.mouths) {
+      const start = this.clipStarts.get(index);
+      if (start === undefined) continue;
+      const elapsed = now - start;
+      if (elapsed < 0) continue;
+      const frame = Math.floor(elapsed * mouth.fps);
+      if (frame < mouth.frames.length) return mouth.frames[frame] ?? null;
+    }
+    return null;
+  }
+
   private async play(clip: ClipMessage): Promise<void> {
     if (this.clipArrivedAt === null) this.clipArrivedAt = performance.now();
 
@@ -512,6 +567,9 @@ export class LiveCall {
     source.start(startAt);
     this.nextStart = startAt + buffer.duration;
     this.sources.push(source);
+    // Recorded on the SAME clock the audio is scheduled on. Wall-clock time drifts against an
+    // AudioContext, and a mouth that drifts is worse than no mouth.
+    this.clipStarts.set(clip.index, startAt);
 
     const delay = Math.max(0, (startAt - ctx.currentTime) * 1000);
     this.at(delay, () => this.mouthOn(clip.text));
@@ -574,6 +632,9 @@ export class LiveCall {
     });
     this.sources = [];
     this.smoothed = 0;
+    this.mouths.forEach((mouth) => mouth.frames.forEach((frame) => frame.close()));
+    this.mouths.clear();
+    this.clipStarts.clear();
     this.timers.forEach((timer) => window.clearTimeout(timer));
     this.timers = [];
     this.nextStart = this.ctx ? this.ctx.currentTime : 0;
@@ -599,6 +660,13 @@ export class LiveCall {
     this.levelBuffer = null;
     this.set({ phase: "ended", listening: false, partial: "" });
   }
+}
+
+interface MouthMessage {
+  type: "mouth";
+  index: number;
+  fps: number;
+  frames: string[];
 }
 
 interface ClipMessage {

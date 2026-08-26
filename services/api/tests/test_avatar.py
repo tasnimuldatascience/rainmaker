@@ -50,13 +50,32 @@ class TestWhichFaceRuns:
 
 
 class TestWhatItAdmitsTo:
-    def test_the_local_face_does_not_claim_lip_sync(self):
-        """It brightens and drifts with the real output level and never moves its mouth. The
-        console badge says so, because a still face that claimed to lip-sync would read as
-        broken rather than as deliberate."""
+    def test_a_still_face_says_it_is_still(self):
+        """With no checkpoint she does not move, and the console badge says so — a still face
+        claiming to lip-sync reads as broken rather than as deliberate."""
         described = describe(PortraitAvatar())
         assert described["lip_synced"] is False
-        assert "does not pretend" in described["note"]
+        assert "fetch-lipsync" in described["note"]
+
+    def test_a_face_that_is_lip_syncing_says_that_instead(self):
+        """The badge tracks what is loaded rather than a constant. A reader checks it against
+        the screen, so it has to be true in both directions."""
+
+        class Loaded:
+            ready = True
+
+        described = describe(PortraitAvatar(lipsync=Loaded()))
+        assert described["lip_synced"] is True
+        assert "Wav2Lip" in described["label"]
+
+    def test_an_installed_but_unloaded_generator_is_not_yet_lip_sync(self):
+        """It takes six seconds to load. Claiming lip-sync during that window puts a badge on
+        screen that the face is not honouring yet."""
+
+        class Loading:
+            ready = False
+
+        assert describe(PortraitAvatar(lipsync=Loading()))["lip_synced"] is False
 
     def test_every_face_admits_to_being_synthetic(self):
         """The product enforces telling people it is an AI. A face that was never anyone's is

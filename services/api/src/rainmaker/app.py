@@ -15,6 +15,19 @@ divergence lives.
 
 from __future__ import annotations
 
+import os as _os
+
+# BEFORE ANY MODEL LIBRARY IS IMPORTED. This process ends up with torch (the model and the
+# lip-sync generator) and onnxruntime (the voice) in it, and on Windows both ship their own copy
+# of the Intel OpenMP runtime. The second one to initialise aborts the process:
+#
+#     OMP: Error #15: Initializing libiomp5md.dll, but found libiomp5md.dll already initialized
+#
+# The documented workaround is to allow the duplicate. It has to be set before the first import
+# rather than before the first use, which is why it sits above the imports instead of in the
+# module that needs it.
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import asyncio
 import base64
 import contextlib
@@ -35,6 +48,7 @@ from .calls.agenda import Agenda, Panel, Phase
 from .calls.avatar import build_avatar
 from .calls.avatar import describe as describe_avatar
 from .calls.intake import InvalidEmail, parse_contact
+from .calls.lipsync import LipSync
 from .calls.pipeline import (
     TURN_BUDGET_MS,
     CallPipeline,
@@ -72,6 +86,7 @@ class AppState:
     tts: TextToSpeech
     tools: ToolBroker
     avatar: Any
+    lipsync: LipSync
 
 
 state = AppState()
@@ -89,7 +104,7 @@ async def _warm_engines() -> None:
     Off the event loop, because both loads are blocking and the console must be able to
     connect while they run.
     """
-    for engine in (state.llm, state.tts):
+    for engine in (state.llm, state.tts, state.lipsync):
         load = getattr(engine, "load", None)
         if load is None or not getattr(engine, "available", False):
             continue
@@ -108,7 +123,11 @@ async def lifespan(app: FastAPI):
 
     state.llm = build_language_model(os.environ.get("RAINMAKER_BRAIN", "auto"))
     state.tts = build_voice(os.environ.get("RAINMAKER_VOICE", "auto"))
+    state.lipsync = LipSync()
     state.avatar = build_avatar(os.environ.get("RAINMAKER_AVATAR", "auto"))
+    # The face reports whether it is lip-syncing, so it needs to know what is generating.
+    if hasattr(state.avatar, "lipsync"):
+        state.avatar.lipsync = state.lipsync
     warming = asyncio.create_task(_warm_engines())
 
     # The tool servers are subprocesses and must be started and stopped from the SAME task —
@@ -294,7 +313,7 @@ def create_app() -> FastAPI:
         """
         return {
             "engines": engines(state.llm, state.tts),
-            "avatar": describe_avatar(state.avatar),
+            "avatar": {**describe_avatar(state.avatar), "lipsync": state.lipsync.describe()},
             "tools": state.tools.describe(),
             "disclosure": Disclosure().spoken,
             "budget_ms": TURN_BUDGET_MS,
@@ -333,6 +352,28 @@ def create_app() -> FastAPI:
             ),
         )
         agenda: Agenda | None = None
+        mouths: set[asyncio.Task] = set()
+
+        async def send_mouth(index: int, wav: bytes) -> None:
+            """Generate and send the mouth frames for a clip that has already been sent.
+
+            AUDIO IS NEVER DELAYED BY VIDEO. Generation is fast — seventeen times realtime once
+            warm — but it is not free, and putting it on the path between synthesis and the
+            socket would add its cost to the one number this project is about. So the clip goes
+            out the instant the audio exists, this runs after it, and the console syncs the
+            frames to the audio's already-scheduled start time, dropping any that are late.
+            Worst case the mouth joins a beat into the first clause; the voice never waits.
+            """
+            try:
+                frames = await asyncio.to_thread(state.lipsync.frames_for_wav, wav)
+                if not frames:
+                    return
+                encoded = await asyncio.to_thread(LipSync.encode, frames)
+                await ws.send_json(
+                    {"type": "mouth", "index": index, "fps": 25, "frames": encoded}
+                )
+            except Exception as exc:  # noqa: BLE001 — a missing mouth is not a broken call
+                log.debug("no mouth frames for clip %d: %s", index, exc)
 
         async def send_events(events: AsyncIterator[Any]) -> None:
             async for event in events:
@@ -358,6 +399,12 @@ def create_app() -> FastAPI:
                             "browser_voice": event.clip.browser_voice,
                         }
                     )
+                    if state.lipsync.ready and event.clip.wav:
+                        task = asyncio.create_task(
+                            send_mouth(event.clip.index, event.clip.wav)
+                        )
+                        mouths.add(task)
+                        task.add_done_callback(mouths.discard)
                 elif isinstance(event, Panel):
                     await ws.send_json({"type": "panel", "panel": event.kind, **event.data})
                 elif isinstance(event, Phase):
@@ -502,6 +549,9 @@ def create_app() -> FastAPI:
         finally:
             if turn and not turn.done():
                 turn.cancel()
+            # The socket is going; frames for it are worth nothing.
+            for task in list(mouths):
+                task.cancel()
 
     # ─────────────────────────────────────────────────────────── deals (read-only)
     @app.get("/api/deals")

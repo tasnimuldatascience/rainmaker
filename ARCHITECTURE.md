@@ -185,5 +185,9 @@ data being present. Fixed with a service worker; the shot is now in the README a
   base64 WAV per clause. A production deployment wants LiveKit or equivalent for jitter buffering,
   reconnects and echo cancellation; none of that is here.
 - **GPU synthesis.** See above. The single change most likely to bring the turn inside budget.
-- **The realtime avatar.** Adapter code exists; the GPU service does not. Stated in the README
-  rather than implied.
+- **A commercially licensed talking head.** The face lip-syncs, on the local GPU, via Wav2Lip —
+  whose weights are academic and personal use only. Every other dependency here is permissive.
+  A hosted provider behind the same interface is the commercial path and is not wired up.
+- **A head that moves.** Wav2Lip regenerates a mouth on a fixed photograph; the head itself never
+  turns, nods or blinks. That is the difference between this and a video avatar, and closing it
+  needs a driving video (LivePortrait) rather than a still.

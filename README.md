@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-309%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-334%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -26,7 +26,7 @@ calendar, and shows you a price — then writes the whole thing into the pipelin
 
 | Part | What it does |
 |---|---|
-| **The call** | An AI account executive you can type to or talk to. She answers out loud, says she is an AI before anything else, and stops selling the moment you ask for a person |
+| **The call** | An AI account executive you can type to or talk to. She answers out loud with her mouth moving to her own voice, says she is an AI before anything else, and stops selling the moment you ask for a person |
 | **Research** | Reads a prospect's public website live, on screen, and only lets her state what it actually found |
 | **Tools** | A calendar, a CRM, a browser and a mailbox — reached over MCP, so a customer's own systems drop in |
 | **Sales dashboard** | Where reps track their deals — **and it works with no internet at all** |
@@ -81,6 +81,12 @@ python scripts/fetch-models.py            # its weights: 330MB, Apache-2.0, no a
 
 pip install -e "services/api[brain]"      # the model: torch, ~2.5GB
 # Qwen2.5-1.5B-Instruct downloads itself on first start
+```
+
+And to make her mouth move:
+
+```bash
+python scripts/fetch-lipsync.py     # Wav2Lip, 436MB. Read the licence prompt — it is not Apache
 ```
 
 Restart the API and `/api/calls/health` will say what loaded. So will the console.
@@ -266,23 +272,40 @@ fix was not taken.
 ### Her face
 
 She is a **photoreal portrait of nobody** — a StyleGAN face from a public-domain set, not a real
-person's likeness. It brightens and moves with the real loudness of the audio playing at that
-instant, and it does not pretend to lip-sync.
+person's likeness — and **her mouth is generated from the audio she is saying**. Wav2Lip runs on
+the local GPU against the same Kokoro clip the browser is about to play.
 
-That last part is deliberate. Warping the mouth of a still photograph is guesswork, and the
-uncanny valley is steepest exactly there: a nearly-right face moving slightly wrong reads as a
-corpse, while the same face holding still reads as a video call with a frozen frame, which
-everyone sees every week. Real lip-sync is a provider swap — set a streaming-avatar key and the
-same slot renders a talking head.
+<img src="docs/img/mouth.png" alt="Consecutive frames of Liv mid-sentence" width="100%">
+
+Those are consecutive frames of one sentence. Nothing is warped or interpolated; each mouth was
+generated for the audio playing at that instant.
+
+It is fast enough to sit inside a conversation for three reasons, none of them clever:
+
+| | |
+|---|---|
+| **The face never changes** | A video pipeline detects a face per frame. There is one photograph here, so the crop is computed once and the 90MB face detector never enters the process |
+| **It runs per clause** | Synthesis already streams clause by clause, so a clip is one to three seconds — one batched forward pass |
+| **Only the mouth is generated** | A 96×96 patch travels to the browser, not a frame of video. About 2.5KB each |
+
+**Seventeen times realtime once warm**, and the audio never waits for it: the clip goes out the
+instant it exists and the frames follow, syncing to the audio's already-scheduled start. Worst
+case her mouth joins a beat into the first clause. The voice is never held up for the face.
+
+Without the checkpoint the photograph simply holds still, lit by the real output level, and the
+console's badge says so. Nothing is faked to cover the gap.
 
 > [!IMPORTANT]
-> **What is running and what is not.** The conversation, the voice, the research, the browsing,
-> the tools, the timing, the disclosure and the handoff are all built and running — the
-> screenshots are one live call and the numbers came off the wire. The hosted talking-head
-> provider is reachable through the same interface and **has not been run here**: there is no key.
-> **MuseTalk was tried and does not run on this machine at all** — it pins `torch 2.0.1+cu118`,
-> whose newest architecture is `sm_90`, and this GPU is `sm_120`. `calls/avatar.py` has the
-> details rather than leaving an adapter nobody can run.
+> **Wav2Lip's weights are for academic and personal use, not commercial use.** Everything else
+> here is Apache-2.0, MIT or public domain; this is the exception, which is why it is an opt-in
+> `scripts/fetch-lipsync.py` rather than something a clone downloads, and why the licence is a
+> prompt rather than a line in a log. For commercial work the same interface takes a hosted
+> provider.
+>
+> **MuseTalk is the better model and does not run on this machine at all** — it pins
+> `torch 2.0.1+cu118`, whose newest architecture is `sm_90`, and this GPU is `sm_120`. It also
+> wants mmcv built from source and quotes five minutes of compute per eight seconds of video on
+> a laptop card. `calls/avatar.py` has the details rather than leaving an adapter nobody can run.
 
 ---
 
@@ -304,11 +327,11 @@ same slot renders a talking head.
 ## Tests
 
 ```bash
-npm test                       # 49 tests — syncing, text editing, the call rail
-pytest                         # 260 tests — research, syncing, the API, the live call, the tools
+npm test                       # 51 tests — syncing, text editing, the call surface
+pytest                         # 283 tests — research, syncing, the API, the live call, the tools
 ```
 
-309 tests in total. None of them load a language model: a test that spends six seconds on
+334 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
@@ -322,6 +345,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
 | `test_agenda.py` | That she researches before she greets, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
 | `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, and that she will not email anyone who was not on the call |
+| `test_lipsync.py` | The spectrogram her mouth is driven by — a mel that is subtly wrong makes her lip-sync confidently to the wrong sounds, which looks like a bad model rather than a bad constant |
 | `test_avatar.py` | That the face admits what it is: synthetic, and not lip-syncing unless a provider is actually doing it |
 | `test_readme.py` | That these counts are the counts. A badge is an image, and nobody proofreads an image |
 

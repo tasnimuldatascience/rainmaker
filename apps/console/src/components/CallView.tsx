@@ -158,6 +158,7 @@ export function CallView({ store }: { store: LocalStore }) {
               <div className="pip" data-speaking={state.speaking}>
                 <Portrait
                   level={() => call.level()}
+                  mouth={() => call.mouthFrame()}
                   speaking={state.speaking}
                   listening={!state.speaking}
                   fill

@@ -9,7 +9,7 @@
  */
 
 import { chromium } from "playwright";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -123,6 +123,65 @@ await shot("booking", async (p) => {
   await p.click(".slot");
   await p.waitForSelector(".big-tick", { timeout: 120000 });
 }, 400);
+
+// Consecutive frames of her face mid-sentence, for the README's lip-sync claim. Cropped to the
+// floating window and captured a fraction of a second apart, so the mouths visibly differ --
+// the claim is that she is talking, and a single still cannot show that.
+{
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await setTheme("dark");
+  await page.click('.nav button:has-text("Live call")');
+  await page.fill(".intake input", "dana.whitfield@stripe.com");
+  await page.click('button:has-text("Start the call")');
+
+  const drawing = await page
+    .waitForFunction(
+      () => {
+        const c = document.querySelector(".portrait-mouth");
+        return c !== null && getComputedStyle(c).opacity === "1";
+      },
+      null,
+      { timeout: 120000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+
+  if (!drawing) {
+    console.warn("no mouth frames — skipping mouth.png (is the Wav2Lip checkpoint installed?)");
+  } else {
+    const shots = [];
+    for (let i = 0; i < 5; i += 1) {
+      const pip = await page.$(".pip");
+      shots.push(await pip.screenshot());
+      await page.waitForTimeout(120);
+    }
+    const { createCanvas, loadImage } = await import("node:module").then(() => ({}))
+      .catch(() => ({}));
+    // No canvas dependency: write the frames and stitch them with sharp-free maths in Python
+    // is overkill, so the strip is assembled by the browser itself.
+    const encoded = shots.map((b) => b.toString("base64"));
+    const strip = await page.evaluate(async (frames) => {
+      const images = await Promise.all(
+        frames.map(
+          (data) =>
+            new Promise((resolve) => {
+              const img = new Image();
+              img.onload = () => resolve(img);
+              img.src = `data:image/png;base64,${data}`;
+            }),
+        ),
+      );
+      const canvas = document.createElement("canvas");
+      canvas.width = images[0].width * images.length;
+      canvas.height = images[0].height;
+      const ctx = canvas.getContext("2d");
+      images.forEach((img, i) => ctx.drawImage(img, i * img.width, 0));
+      return canvas.toDataURL("image/png").split(",")[1];
+    }, encoded);
+    writeFileSync(resolve(OUT, "mouth.png"), Buffer.from(strip, "base64"));
+    console.log("wrote docs/img/mouth.png");
+  }
+}
 
 // The offline shot. This is the product's actual claim, so it is captured against a genuinely
 // severed connection rather than mocked: route abort kills the socket and every fetch, then
