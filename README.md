@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-513%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-517%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -125,6 +125,7 @@ STRIPE_SECRET_KEY=sk_…     # take real money instead of the local mock checkou
 OUR_CATEGORY="vector search,learning-to-rank"   # rank job posts mentioning these highest
 RAINMAKER_VOICE=browser    # force the fallback voice, to hear the difference
 RAINMAKER_VOICE_SPEED=1.0  # Kokoro clips its own phrase endings above about 1.05
+                           # (voices are chosen by Kokoro's published grade — see providers.py)
 RAINMAKER_MAX_CHARGE=…     # the ceiling above which a person has to sign, in minor units
 RAINMAKER_CALLS_PER_VISITOR_HOUR=…   # raise the rate limit; the screenshot script needs this
 ```
@@ -515,10 +516,10 @@ worse than the call it prevented.
 
 ```bash
 npm test                       # 53 tests — syncing, text editing, the call surface
-pytest                         # 460 tests — research, syncing, the API, the live call, the tools
+pytest                         # 464 tests — research, syncing, the API, the live call, the tools
 ```
 
-513 tests in total. None of them load a language model: a test that spends six seconds on
+517 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |

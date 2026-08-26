@@ -246,7 +246,9 @@ def liv_spec() -> AgentSpec:
             "it works on their own business, and either get them started or get them a time "
             "with someone."
         ),
-        voice="liv",
+        # A different voice from the demo tenant's, so two agents on one machine are told apart
+        # by ear. Both are top-graded; see `providers.KokoroTextToSpeech.VOICES`.
+        voice="female-clear",
         portrait="/agent/liv.jpg",
         knowledge=(
             Fact(

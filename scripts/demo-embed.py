@@ -76,7 +76,7 @@ def tessera() -> AgentSpec:
         # template rather than of multi-tenancy, and the face is the first thing a buyer
         # notices. `scripts/fetch-face.py` picked it out of the same Apache-2.0 set of
         # synthetic portraits Liv came from.
-        voice="female-clear",
+        voice="female-warm",
         portrait="/agent/mara.jpg",
         knowledge=(
             Fact(

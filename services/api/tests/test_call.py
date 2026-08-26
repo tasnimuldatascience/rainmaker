@@ -627,3 +627,56 @@ class TestTheTailIsNotCutTwice:
             "Of course, I can walk you through what that would cost for a team your size."
         )
         assert len(chunks[0]) <= FIRST_CHUNK_CHARS + 12, chunks[0]
+
+
+class TestTheVoiceNeverClips:
+    """MEASURED ON THIS PRODUCT'S OWN QUOTE SENTENCE. `bf_isabella` — the voice the demo agent
+    was on — peaked at 1.14 reading it, and the WAV that reached the browser had samples pinned
+    at full scale. That is clipping: a hard, buzzy distortion landing on exactly the loudest
+    syllables, and it is one of the things people are hearing when they call a synthesised voice
+    cheap.
+
+    Kokoro's voices vary by more than 2x in output level, so this cannot be fixed by choosing a
+    good one: it has to be a ceiling.
+    """
+
+    @staticmethod
+    def voice(**kw):
+        from rainmaker.calls.providers import KokoroTextToSpeech
+
+        return KokoroTextToSpeech(**kw)
+
+    def test_a_hot_clip_is_brought_under_full_scale(self):
+        import numpy as np
+
+        levelled = self.voice()._level(np.array([1.14, -1.2, 0.4], dtype=np.float32))
+        assert float(np.max(np.abs(levelled))) <= 0.9
+
+    def test_a_quiet_clip_is_left_alone(self):
+        """Normalising upwards would make the level jump between one sentence and the next,
+        which is worse than a quiet voice and far harder to diagnose."""
+        import numpy as np
+
+        quiet = np.array([0.1, -0.2, 0.05], dtype=np.float32)
+        assert np.allclose(self.voice()._level(quiet), quiet)
+
+    def test_an_empty_clip_does_not_divide_by_zero(self):
+        import numpy as np
+
+        assert self.voice()._level(np.array([], dtype=np.float32)).size == 0
+
+    def test_every_offered_voice_exists_in_the_pack(self):
+        """A tenant naming a voice that is not in the model gets silence on a live call. The
+        map is hand-written and the pack has fifty-four entries; they drift."""
+        from rainmaker.calls.providers import KOKORO_VOICES, KokoroTextToSpeech
+
+        if not KOKORO_VOICES.exists():
+            pytest.skip("voice pack not downloaded — scripts/fetch-models.py")
+
+        from kokoro_onnx import Kokoro
+
+        from rainmaker.calls.providers import KOKORO_MODEL
+
+        available = set(Kokoro(str(KOKORO_MODEL), str(KOKORO_VOICES)).get_voices())
+        offered = {name for name, _ in KokoroTextToSpeech.VOICES.values()}
+        assert offered <= available, offered - available

@@ -354,13 +354,31 @@ class KokoroTextToSpeech(TextToSpeech):
 
     name = "kokoro"
 
-    #: Product voice names mapped onto Kokoro's, so the voice can be swapped for another engine
-    #: without every stored agent configuration becoming wrong.
+    #: The voices a tenant may pick, and the Kokoro voice behind each.
+    #:
+    #: CHOSEN BY GRADE, NOT BY NAME. Kokoro publishes a quality grade per voice that reflects how
+    #: much training data it had, and it tracks how stable and natural each one is. There are
+    #: fifty-four voices in the pack; this exposes the ones worth putting on a sales call.
+    #:
+    #: The demo agent was on `bf_isabella`, which is graded C — and measurably the worst of the
+    #: set on the one thing that matters here: it peaks at 1.14 on our own quote sentence, which
+    #: is above full scale. That is digital clipping, it is a hard distortion, and it is one of
+    #: the things people mean when they say a voice sounds synthetic. `af_heart` (grade A) reads
+    #: the same sentence peaking at 0.45.
+    #:
+    #: `af_nicole` is graded B- and is excluded on measurement rather than grade: the same line
+    #: takes 19.6 seconds against 12 for the others, because it is a breathy ASMR voice. On a
+    #: sales call that is not a voice, it is a mood.
     VOICES: dict[str, tuple[str, str]] = {
+        # name             kokoro     lang      grade
+        "female-warm": ("af_heart", "en-us"),  # A
+        "female-clear": ("af_bella", "en-us"),  # A-
+        "female-british": ("bf_emma", "en-gb"),  # B-
+        "male-warm": ("am_michael", "en-us"),  # C+
+        "male-british": ("bm_george", "en-gb"),  # C
+        # Kept because specs in the wild carry them: `liv` shipped as the default voice name,
+        # and `male-us` was the only American male. Both point at the best voice of their kind.
         "liv": ("af_heart", "en-us"),
-        "female-warm": ("bf_emma", "en-gb"),
-        "female-clear": ("bf_isabella", "en-gb"),
-        "male-warm": ("bm_george", "en-gb"),
         "male-us": ("am_michael", "en-us"),
     }
 
@@ -439,19 +457,45 @@ class KokoroTextToSpeech(TextToSpeech):
             self.load_seconds = time.perf_counter() - started
             log.info("loaded Kokoro in %.1fs", self.load_seconds)
 
+    #: Leave a little headroom below full scale. Not taste — the browser mixes these clips and
+    #: anything at 1.0 has nowhere to go.
+    PEAK_CEILING = 0.89
+
     def _synth(self, text: str) -> Clip:
-        kokoro_voice, lang = self.VOICES.get(self.voice, self.VOICES["liv"])
+        kokoro_voice, lang = self.VOICES.get(self.voice, self.VOICES["female-warm"])
         started = time.perf_counter()
         samples, rate = self._kokoro.create(
             text, voice=kokoro_voice, speed=self.speed, lang=lang
         )
         return Clip(
             text=text,
-            wav=to_wav(samples, rate),
+            wav=to_wav(self._level(samples), rate),
             sample_rate=rate,
             duration_ms=len(samples) / rate * 1000,
             generate_ms=(time.perf_counter() - started) * 1000,
         )
+
+    def _level(self, samples: Any) -> Any:
+        """Bring a clip under full scale, and only ever downwards.
+
+        MEASURED, NOT PRECAUTIONARY. Reading this product's own quote sentence, `bf_isabella`
+        peaked at 1.14 — above full scale — and the served WAV came back with samples pinned at
+        the ceiling. That is clipping: a hard, buzzy distortion on exactly the loudest syllables,
+        which is one of the things people are hearing when they say a synthesised voice sounds
+        cheap. Voices vary by more than 2x in level, so this cannot be fixed by picking a good
+        one and hoping.
+
+        Downwards only, deliberately. Normalising quiet clips UP would make the level jump
+        between one sentence and the next, which is worse than a quiet voice and much harder to
+        diagnose.
+        """
+        import numpy as np
+
+        audio = np.asarray(samples, dtype=np.float32)
+        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        if peak > self.PEAK_CEILING:
+            audio = audio * (self.PEAK_CEILING / peak)
+        return audio
 
     async def clips(self, text: AsyncIterator[str]) -> AsyncIterator[Clip]:
         """Synthesise a streaming reply, yielding each chunk the moment it is ready.
