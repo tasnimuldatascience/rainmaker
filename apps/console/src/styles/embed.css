@@ -40,11 +40,13 @@
   background: linear-gradient(170deg, var(--surface-3), var(--surface-1));
 }
 .w-face .portrait { inline-size: 100%; block-size: 100%; border-radius: 0; }
+/* UNDER HER FACE, NOT ACROSS IT. Overlaid on the lower third of the portrait, the caption sat
+   exactly where the mouth is — and the mouth is the part this whole avatar exists to move. It
+   was only ever visible because the previous portrait was framed further out. */
 .w-caption {
-  position: absolute; inset-inline: var(--s-3); inset-block-end: var(--s-3);
-  padding: var(--s-2) var(--s-3); border-radius: var(--r-md);
-  background: rgb(0 0 0 / 0.62); backdrop-filter: blur(6px);
-  font-size: var(--t-sm); line-height: 1.45;
+  padding: var(--s-2) var(--s-4);
+  background: var(--surface-2); border-block-end: 1px solid var(--line);
+  font-size: var(--t-sm); line-height: 1.45; color: var(--fg-2);
   max-block-size: 4.6rem; overflow: hidden;
 }
 

@@ -668,8 +668,11 @@
     text-wrap: balance; pointer-events: none;
     /* Three lines, like a real caption track. The text itself is trimmed to its tail in the
        component, so what is clamped away is the beginning of the sentence rather than the end
-       somebody is currently hearing. */
-    max-block-size: 4.4em; overflow: hidden;
+       somebody is currently hearing.
+       `line-clamp` rather than a height: at 4.4em the third line was a hair too tall for its
+       box and came out sliced through the middle of the letters. */
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    line-clamp: 3; overflow: hidden;
   }
   .meet-caption[data-partial] { color: rgb(255 255 255 / 0.62); font-style: italic; }
   .meet-stage:has(.meet-self) .meet-caption { inset-inline-end: 15rem; margin-inline: 0 auto; }

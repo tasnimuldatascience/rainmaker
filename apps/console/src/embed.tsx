@@ -111,8 +111,8 @@ function Widget() {
           fill
           src={state.agent?.portrait ?? door?.portrait ?? "/agent/liv.jpg"}
         />
-        {state.caption && <div className="w-caption">{state.caption}</div>}
       </div>
+      {state.caption && <div className="w-caption">{state.caption}</div>}
 
       {!live ? (
         <div className="w-start">
