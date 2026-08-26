@@ -570,3 +570,51 @@ class TestFactsSheIsNotAllowedToRepeat:
         """Filtering has to be narrow. "Engineer / Platform" is a real posting."""
         facts = facts_from_enrichment({"hiring": [{"title": "Senior Engineer / Platform"}]})
         assert "Senior Engineer / Platform" in " ".join(facts)
+
+
+class TestSheScrollsToThePoint:
+    """`browse` has taken a `scroll_to` since it was written and nothing passed one, so every
+    page opened at the top and she narrated a viewport the prospect had to scroll past to check.
+    """
+
+    async def test_a_pricing_page_is_scrolled_to_the_pricing(self):
+        agenda, tools = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("show me what it looks like"))
+
+        browsed = tools.named("research.browse")
+        assert browsed and browsed[0]["scroll_to"] == "pricing"
+
+    async def test_the_phrase_comes_from_what_research_actually_found(self):
+        """Guessing a phrase gets a page that does not contain it. These come from the facts, so
+        the page demonstrably has them."""
+        agenda, tools = build(
+            **{
+                "research.pages_worth_showing": {
+                    "pages": [{"label": "careers", "url": "https://corvus.example/careers"}]
+                },
+                "research.research_company": {
+                    "name": {"value": "Corvus Data"},
+                    "hiring": [{"title": "Data Engineer"}, {"title": "Platform Engineer"}],
+                    "pages_fetched": [],
+                },
+            }
+        )
+        await collect(agenda.begin())
+        await collect(agenda.respond("show me what it looks like"))
+
+        assert tools.named("research.browse")[0]["scroll_to"] == "Data Engineer"
+
+    async def test_nothing_to_aim_at_is_not_an_error(self):
+        """A miss costs nothing: `browse` treats an absent phrase as no scroll."""
+        agenda, tools = build(
+            **{
+                "research.pages_worth_showing": {
+                    "pages": [{"label": "about", "url": "https://corvus.example/about"}]
+                },
+                "research.research_company": {"name": {"value": "Corvus"}, "pages_fetched": []},
+            }
+        )
+        await collect(agenda.begin())
+        await collect(agenda.respond("show me what it looks like"))
+        assert tools.named("research.browse")[0]["scroll_to"] == ""

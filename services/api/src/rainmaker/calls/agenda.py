@@ -531,9 +531,16 @@ class Agenda:
 
         self.shown.add(page["url"])
         yield Panel("browser", {"state": "opening", "url": page["url"], "label": page["label"]})
+
+        # SCROLL TO THE THING SHE IS ABOUT TO TALK ABOUT. `browse` has taken a `scroll_to` since
+        # it was written and nothing ever passed one, so every page opened at the top and she
+        # narrated a viewport the prospect had to scroll past to check. A screen share that does
+        # not go to the point is a screen share of a homepage.
+        target = self._scroll_target(page["label"])
         try:
             looked = await self.tools.call(
-                "research.browse", {"url": page["url"], "screenshot": True}
+                "research.browse",
+                {"url": page["url"], "screenshot": True, "scroll_to": target},
             )
         except Exception as exc:  # noqa: BLE001
             log.info("could not open %s: %s", page["url"], exc)
@@ -549,6 +556,7 @@ class Agenda:
                 "title": looked.get("title", ""),
                 "label": page["label"],
                 "frame": looked.get("frame_jpeg_base64", ""),
+                "scrolled_to": looked.get("scrolled_to", ""),
             },
         )
         # The model is handed what is ON SCREEN, so the narration and the picture agree. Given
@@ -566,6 +574,25 @@ class Agenda:
             f"inbound call. The page says: {excerpt})"
         ):
             yield event
+
+    def _scroll_target(self, label: str) -> str:
+        """A phrase on this page worth putting in the middle of the screen.
+
+        Taken from what research already found rather than guessed at, so the phrase is one the
+        page demonstrably contains. `browse` treats a phrase it cannot find as no scroll at all,
+        so a miss costs nothing and a hit puts the evidence where she is pointing.
+        """
+        if label == "careers":
+            roles = [f for f in self.session.prospect.facts if f.startswith("Currently hiring")]
+            if roles:
+                # "Currently hiring (2 open roles): Data Engineer, ..." -> "Data Engineer"
+                return roles[0].split(":", 1)[-1].split(",")[0].strip()
+        if label == "pricing":
+            return "pricing"
+        tech = [f for f in self.session.prospect.facts if f.startswith("Technology on their site")]
+        if tech:
+            return tech[0].split(":", 1)[-1].split(",")[0].strip()
+        return ""
 
     async def _offer_times(self, said: str) -> AsyncIterator[AgendaEvent]:
         """Offer real slots, in words, from the calendar.

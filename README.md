@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-305%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-309%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -305,10 +305,10 @@ same slot renders a talking head.
 
 ```bash
 npm test                       # 49 tests — syncing, text editing, the call rail
-pytest                         # 256 tests — research, syncing, the API, the live call, the tools
+pytest                         # 260 tests — research, syncing, the API, the live call, the tools
 ```
 
-305 tests in total. None of them load a language model: a test that spends six seconds on
+309 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |

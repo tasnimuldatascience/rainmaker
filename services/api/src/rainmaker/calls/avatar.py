@@ -131,6 +131,9 @@ class HostedAvatar(Avatar):
 
     name = "hosted"
     realtime = True
+    #: Whether the transport below actually exists. False until someone writes it, and
+    #: `build_avatar` refuses to select a provider that cannot render — see the note there.
+    implemented = False
 
     def __init__(self, provider: str, api_key: str):
         self.provider = provider
@@ -176,12 +179,29 @@ def build_avatar(prefer: str = "auto") -> Avatar:
 
     for variable in HOSTED_KEY_VARS:
         key = os.environ.get(variable, "").strip()
-        if key:
-            provider = variable.split("_")[0].title() if variable != "RAINMAKER_AVATAR_KEY" else (
-                os.environ.get("RAINMAKER_AVATAR_PROVIDER", "hosted")
-            )
+        if not key:
+            continue
+        provider = (
+            os.environ.get("RAINMAKER_AVATAR_PROVIDER", "hosted")
+            if variable == "RAINMAKER_AVATAR_KEY"
+            else variable.split("_")[0].title()
+        )
+        hosted = HostedAvatar(provider, key)
+        if hosted.implemented:
             log.info("avatar: using hosted provider %s", provider)
-            return HostedAvatar(provider, key)
+            return hosted
+
+        # A KEY MUST NOT BUY A CLAIM NOBODY HONOURS. Selecting the hosted provider here made
+        # /api/calls/health report `lip_synced: true` while the console went on drawing the same
+        # still portrait, because nothing calls `render` yet. The face would not have changed and
+        # the badge would have lied about it — which is worse than the missing feature, and worse
+        # than the honest fallback it replaced.
+        log.warning(
+            "avatar: %s is configured but its transport is not implemented in this "
+            "repository; using the local portrait and saying so",
+            provider,
+        )
+        return PortraitAvatar()
 
     return PortraitAvatar()
 

@@ -15,11 +15,29 @@ class TestWhichFaceRuns:
             monkeypatch.delenv(var, raising=False)
         assert isinstance(build_avatar(), PortraitAvatar)
 
-    def test_a_configured_provider_wins(self, monkeypatch: pytest.MonkeyPatch):
+    def test_a_key_does_not_buy_a_claim_nobody_honours(self, monkeypatch: pytest.MonkeyPatch):
+        """Setting a key used to select `HostedAvatar`, so `/api/calls/health` reported
+        `lip_synced: true` while the console drew the same still portrait — nothing calls
+        `render` yet. The face would not have changed and the badge would have lied about it,
+        which is worse than the missing feature."""
         monkeypatch.setenv("SIMLI_API_KEY", "sk-not-a-real-key")
         avatar = build_avatar()
+
+        assert isinstance(avatar, PortraitAvatar)
+        assert describe(avatar)["lip_synced"] is False
+
+    def test_a_provider_is_selected_once_its_transport_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The selection logic itself is right; it is gated on the transport being real. This
+        is the test that starts passing the day someone implements `render`."""
+        monkeypatch.setenv("SIMLI_API_KEY", "sk-not-a-real-key")
+        monkeypatch.setattr(HostedAvatar, "implemented", True)
+        avatar = build_avatar()
+
         assert isinstance(avatar, HostedAvatar)
         assert avatar.api_key == "sk-not-a-real-key"
+        assert describe(avatar)["lip_synced"] is True
 
     def test_an_empty_key_is_not_a_key(self, monkeypatch: pytest.MonkeyPatch):
         """An unset variable exported as "" is the normal state of a half-filled .env, and
