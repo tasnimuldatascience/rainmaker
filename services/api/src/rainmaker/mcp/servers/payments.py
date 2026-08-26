@@ -38,6 +38,11 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+# Numbers as words for anything spoken aloud. Shared with the quote rather than reimplemented:
+# two number-spellers drift, and the symptom is a price that is right on screen and wrong in the
+# ear on one path only.
+from ...agents.quoting import money_words as _spoken_money
+
 DATA_DIR = Path(os.environ.get("RAINMAKER_DATA", "data"))
 DB_PATH = Path(os.environ.get("RAINMAKER_PAYMENTS_DB", DATA_DIR / "payments.sqlite3"))
 
@@ -174,10 +179,12 @@ def create_checkout(
         "amount_display": _money(amount, currency),
         "period": period,
         "description": description,
-        # Said by the platform, not composed by the model, because it names a sum.
+        # Said by the platform, not composed by the model, because it names a sum — and said
+        # in WORDS, because a synthesiser handed "$4,800" phonemises the symbol first and reads
+        # "dollar four thousand eight hundred". See `agents.quoting.money_words`.
         "spoken": (
-            f"That's {_money(amount, currency)}"
-            + (f" per {period}" if period else "")
+            f"That's {_spoken_money(amount, currency)}"
+            + (f" a {period}" if period else "")
             + " - the checkout is on your screen."
         ),
         "test_mode": provider == "mock",

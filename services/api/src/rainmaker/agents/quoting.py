@@ -48,6 +48,78 @@ SIZE_SEATS: dict[str, int] = {
 MAX_SEATS = 1_000_000
 
 
+#: Numbers as words, because the voice reads what it is given.
+#:
+#: THE SYNTHESISER SAYS "DOLLAR FOUR THOUSAND EIGHT HUNDRED". Handed "$4,800", espeak
+#: phonemises the symbol as the word "dollar" and puts it FIRST, then reads the digits — and
+#: "$2.40" comes out as "dollar two. forty", with a full stop in the middle of the price. That
+#: is the single most obviously synthetic thing on the call, and it happens at the one moment
+#: the whole product exists for.
+#:
+#: The call rules have always told the MODEL to write numbers the way they are spoken. The
+#: platform's own computed sentence was breaking its own rule, which is the sort of thing that
+#: only shows up when you phonemise what you are actually sending.
+_ONES = (
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+    "nineteen",
+)
+_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+
+#: What a unit of each currency is called, singular and plural.
+_CURRENCY_WORDS = {
+    "usd": ("dollar", "dollars", "cent", "cents"),
+    "gbp": ("pound", "pounds", "penny", "pence"),
+    "eur": ("euro", "euros", "cent", "cents"),
+}
+
+
+def _hundreds(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        return _TENS[tens] + (f" {_ONES[ones]}" if ones else "")
+    hundreds, rest = divmod(n, 100)
+    said = f"{_ONES[hundreds]} hundred"
+    return f"{said} and {_hundreds(rest)}" if rest else said
+
+
+def number_words(n: int) -> str:
+    """`4800` -> "four thousand eight hundred". Spoken form, not written form."""
+    if n < 0:
+        return f"minus {number_words(-n)}"
+    if n < 1000:
+        return _hundreds(n)
+    for size, name in ((1_000_000_000, "billion"), (1_000_000, "million"), (1_000, "thousand")):
+        if n >= size:
+            count, rest = divmod(n, size)
+            said = f"{number_words(count)} {name}"
+            return f"{said} {number_words(rest)}" if rest else said
+    return str(n)
+
+
+def money_words(amount: int, currency: str) -> str:
+    """Minor units to something a voice can read: `480000, "usd"` -> "four thousand eight
+    hundred dollars"."""
+    major_word, major_plural, minor_word, minor_plural = _CURRENCY_WORDS.get(
+        currency.lower(), ("unit", "units", "part", "parts")
+    )
+    major, minor = divmod(abs(amount), 100)
+
+    said = f"{number_words(major)} {major_word if major == 1 else major_plural}" if major else ""
+    if minor:
+        # "two dollars forty", the way a person says a price — not "two dollars and forty cents",
+        # which is how a form reads it back to you.
+        small = (
+            f"{number_words(minor)}"
+            if said
+            else f"{number_words(minor)} {minor_word if minor == 1 else minor_plural}"
+        )
+        said = f"{said} {small}" if said else small
+    return said or f"zero {major_plural}"
+
+
 @dataclass(frozen=True, slots=True)
 class Quote:
     """A number with somebody's name on it. Every field is computed, none is generated."""
@@ -93,16 +165,19 @@ class Quote:
         times: this sentence is a commitment, and the one place a number turns into one is not
         where you want a 1.5B model paraphrasing.
         """
-        each = self.money(self.unit_amount)
-        total = self.money(self.total)
+        # WRITTEN FOR THE EAR, NOT FOR THE SCREEN. The screen version of this sentence had an
+        # em dash in the middle and said "per month" twice; read aloud that is a stumble and a
+        # repetition. A person says the rate, then what it comes to.
+        each = money_words(self.unit_amount, self.currency)
+        total = money_words(self.total, self.currency)
         opening = "For about " if self.assumed else "For "
         line = (
             f"{opening}{self.units} on {self.tier}, "
-            f"that's {each} per {self.unit_name} per {self.period}"
+            f"that's {each} per {self.unit_name}"
         )
         if self.discount:
-            line += f", less {self.money(self.discount)} for paying annually"
-        return f"{line} — {total} per {self.period}."
+            line += f", less {money_words(self.discount, self.currency)} for paying annually"
+        return f"{line}, which comes to {total} a {self.period}."
 
     def as_dict(self) -> dict[str, Any]:
         return {

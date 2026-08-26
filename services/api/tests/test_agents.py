@@ -345,8 +345,11 @@ class TestLivIsJustTheFirstRow:
         )
         spoken = build_quote(spec, said_seats=2_000).spoken()
         assert "2,000 GPU-hours" in spoken
-        assert "per GPU-hour per month" in spoken
+        assert "per GPU-hour" in spoken
+        assert "a month" in spoken
         assert "seat" not in spoken
+        # Read aloud, not read out: no currency symbols anywhere in a spoken line.
+        assert "$" not in spoken and "£" not in spoken
 
     def test_the_seat_detector_listens_for_the_tenants_word(self):
         """"We need about two thousand GPU hours" states the quantity. A detector that only
@@ -452,3 +455,67 @@ class TestTheDisclosureGuardIsWideEnoughToBeHonest:
         """"Assistant" is about a ROLE, not about being a machine — a human can be one."""
         with pytest.raises(SpecError, match="must actually say"):
             Guardrails(disclosure=wording).validate()
+
+
+class TestEverythingSpokenIsSayable:
+    """FOUND BY PHONEMISING WHAT WE ACTUALLY SEND, WHICH NOBODY HAD DONE.
+
+    espeak turns "$4,800" into "dollar four thousand eight hundred" — the symbol first, as a
+    word, and no plural — and "$2.40" into "dollar two. forty", with a full stop in the middle
+    of a price. Every quote this product read out loud, at the one moment the whole thing exists
+    for, was spoken like that.
+
+    The call rules have told the MODEL to write numbers the way they are spoken since the first
+    week. The platform's own computed sentences were breaking its own rule, and no test noticed
+    because they all asserted on the string rather than on how it sounds.
+    """
+
+    @staticmethod
+    def quote_for(currency: str, unit_amount: int, seats: int):
+        from rainmaker.agents.quoting import build_quote
+        from rainmaker.agents.spec import AgentSpec, Tier
+
+        spec = AgentSpec(
+            tenant="t", agent_id="a", currency=currency, pricing_period="month",
+            pricing=(Tier("Plan", "shown", "", unit_amount=unit_amount, min_seats=1),),
+        )
+        return build_quote(spec, said_seats=seats)
+
+    @pytest.mark.parametrize(
+        "currency,unit_amount,seats,expected",
+        [
+            ("usd", 240, 2000, "four thousand eight hundred dollars"),
+            ("usd", 4000, 10, "four hundred dollars"),
+            ("gbp", 4500, 1, "forty five pounds"),
+            ("usd", 100, 1, "one dollar"),
+            ("eur", 250, 2, "five euros"),
+        ],
+    )
+    def test_a_quote_says_its_figures_in_words(
+        self, currency: str, unit_amount: int, seats: int, expected: str
+    ):
+        assert expected in self.quote_for(currency, unit_amount, seats).spoken()
+
+    @pytest.mark.parametrize("currency", ["usd", "gbp", "eur"])
+    def test_no_spoken_line_contains_a_currency_symbol(self, currency: str):
+        """A symbol in a spoken string is a symbol the voice will read out as a word, in the
+        wrong place. The screen keeps them; the ear never gets one."""
+        spoken = self.quote_for(currency, 12345, 7).spoken()
+        assert not set(spoken) & set("$£€"), spoken
+
+    def test_the_screen_still_gets_the_symbol(self):
+        """The two representations exist for different senses and must not converge."""
+        shown = self.quote_for("usd", 240, 2000).as_dict()
+        assert shown["total_display"].startswith("$")
+        assert "$" not in shown["spoken"]
+
+    def test_the_odd_amounts_are_said_the_way_a_person_says_them(self):
+        from rainmaker.agents.quoting import money_words
+
+        # "two dollars forty", not "two dollars and forty cents", which is how a form reads a
+        # price back to you rather than how anybody says one.
+        assert money_words(240, "usd") == "two dollars forty"
+        assert money_words(40, "usd") == "forty cents"
+        assert money_words(100, "gbp") == "one pound"
+        assert money_words(1_000_00, "usd") == "one thousand dollars"
+        assert money_words(100_000_00, "usd") == "one hundred thousand dollars"

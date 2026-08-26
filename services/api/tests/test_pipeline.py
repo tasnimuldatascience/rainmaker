@@ -338,7 +338,9 @@ class TestTheModelCannotStateAPrice:
             tenant="t", agent_id="a", currency="usd", pricing_period="month",
             pricing=(Tier("Team", "$40", "", unit_amount=4000, min_seats=1),),
         )
-        assert "$400" in build_quote(spec, said_seats=10).spoken()
+        # In words, because it is spoken: espeak reads "$400" as "dollar four hundred".
+        assert "four hundred dollars" in build_quote(spec, said_seats=10).spoken()
+        assert "$400" in build_quote(spec, said_seats=10).as_dict()["total_display"]
 
 
 class TestAskingForAPersonByTheirJob:
