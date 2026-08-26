@@ -29,6 +29,7 @@ import type { AgentRow } from "../lib/call";
 import { frontDoor, publishedAgents } from "../lib/call";
 import { LiveCall } from "../lib/call";
 import type { LocalStore } from "../lib/store";
+import { Avatar } from "./Avatar";
 import { Portrait } from "./Portrait";
 
 const STAGE_COLOR: Record<string, string> = {
@@ -74,6 +75,20 @@ export function CallView({ store }: { store: LocalStore }) {
   const [door, setDoor] = useState<FrontDoor | null>(null);
   // The telemetry drawer. Closed by default: on a call the thing worth looking at is the call.
   const [showSide, setShowSide] = useState(false);
+  const [face, setFace] = useState<FaceKind>(() => {
+    try {
+      return localStorage.getItem("rainmaker.face") === "photo" ? "photo" : "drawn";
+    } catch {
+      return "drawn";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("rainmaker.face", face);
+    } catch {
+      /* a browser with storage disabled still gets a face, just not a remembered one */
+    }
+  }, [face]);
 
   useEffect(() => {
     let live = true;
@@ -141,6 +156,7 @@ export function CallView({ store }: { store: LocalStore }) {
     return (
       <div className="lobby">
         <div className="lobby-preview">
+          <FaceSwitch face={face} setFace={setFace} />
           {agents.length > 1 && (
             <div className="lobby-switch" role="group" aria-label="Which agent answers">
               {agents.map((agent) => (
@@ -156,7 +172,7 @@ export function CallView({ store }: { store: LocalStore }) {
             </div>
           )}
           <div className="lobby-tile">
-            <Portrait level={() => 0} speaking={false} listening={false} fill />
+            <AgentFace kind={face} call={call} state={state} />
             <span className="pip-name">
               <span className="live-dot" />
               {door ? `${door.name} · ${door.company}` : "…"}
@@ -203,13 +219,7 @@ export function CallView({ store }: { store: LocalStore }) {
             <Stage panels={state.panels} active={state.active} onPick={(i) => call.pickSlot(i)} />
           ) : (
             <div className="meet-hero">
-              <Portrait
-                level={() => call.level()}
-                mouth={() => call.mouthFrame()}
-                speaking={state.speaking}
-                listening={!state.speaking}
-                fill
-              />
+              <AgentFace kind={face} call={call} state={state} />
               <span className="pip-name">
                 <span className="live-dot" />
                 {state.agent ? `${state.agent.name} · ${state.agent.company}` : "Liv"}
@@ -220,13 +230,7 @@ export function CallView({ store }: { store: LocalStore }) {
 
         {sharing && (
           <div className="meet-self" data-speaking={state.speaking}>
-            <Portrait
-              level={() => call.level()}
-              mouth={() => call.mouthFrame()}
-              speaking={state.speaking}
-              listening={!state.speaking}
-              fill
-            />
+            <AgentFace kind={face} call={call} state={state} />
             <span className="pip-name">
               <span className="live-dot" />
               {state.agent?.name ?? "Liv"}
@@ -283,6 +287,19 @@ export function CallView({ store }: { store: LocalStore }) {
 
           <button className="meet-round" data-end onClick={() => call.hangUp()} title="End the call">
             ✕<span>End</span>
+          </button>
+
+          <button
+            className="meet-round"
+            onClick={() => setFace(face === "drawn" ? "photo" : "drawn")}
+            title={
+              face === "drawn"
+                ? "Switch to the photoreal face: a real mouth generated from the audio, on a photograph that cannot blink"
+                : "Switch to the illustrated face: blinks, looks around and moves its head, with a mouth driven by the audio level"
+            }
+          >
+            {face === "drawn" ? "🙂" : "🖼"}
+            <span>Face</span>
           </button>
 
           <button
@@ -594,6 +611,78 @@ function StepRail({ step }: { step: Step | null }) {
           {step === "booking" ? "Getting a person" : "Handing over"}
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * Which face is on screen, and why there are two.
+ *
+ * THE PHOTOREAL ONE IS THE STRONGER CLAIM AND THE WEAKER PICTURE. Wav2Lip generates a real mouth
+ * from the real audio on the local GPU, which is the harder thing to build — and it is a
+ * photograph, so it cannot blink, cannot look anywhere, and cannot move its head. A still face
+ * with a moving mouth sits at the bottom of the uncanny valley, and everybody who watched it
+ * said so in the same words: it looks cheap.
+ *
+ * The illustrated one cannot lip-sync from audio, and does not pretend to: its shapes come from
+ * the spelling of what she is saying, which is a poor guide to pronunciation. But it blinks
+ * irregularly, its eyes drift and re-fix, its brows move on stressed syllables, and it tilts
+ * its head while listening — and those are the things that read as alive. Its mouth OPENS on
+ * the measured amplitude of the audio actually playing, so the half a viewer notices is real.
+ *
+ * Both are honest about what they are. The choice is the viewer's and it is remembered.
+ */
+type FaceKind = "drawn" | "photo";
+
+function AgentFace({
+  kind,
+  call,
+  state,
+}: {
+  kind: FaceKind;
+  call: LiveCall;
+  state: CallState;
+}) {
+  if (kind === "photo") {
+    return (
+      <Portrait
+        level={() => call.level()}
+        mouth={() => call.mouthFrame()}
+        speaking={state.speaking}
+        listening={!state.speaking}
+        fill
+      />
+    );
+  }
+  return (
+    <Avatar
+      speech={state.caption}
+      speaking={state.speaking}
+      listening={!state.speaking}
+      level={() => call.level()}
+      fill
+    />
+  );
+}
+
+/** The face chooser, shown in the lobby where there is room to explain the difference. */
+function FaceSwitch({
+  face,
+  setFace,
+}: {
+  face: FaceKind;
+  setFace: (kind: FaceKind) => void;
+}) {
+  return (
+    <div className="face-switch" role="group" aria-label="Which face">
+      <button data-on={face === "drawn"} onClick={() => setFace("drawn")}>
+        Illustrated
+        <span>blinks, looks around</span>
+      </button>
+      <button data-on={face === "photo"} onClick={() => setFace("photo")}>
+        Photoreal
+        <span>real lip-sync, cannot blink</span>
+      </button>
     </div>
   );
 }

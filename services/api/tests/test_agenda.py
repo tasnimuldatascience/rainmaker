@@ -182,6 +182,41 @@ class TestWhatMovesTheCall:
         now. Matched before the model is consulted, because guessing here is expensive."""
         assert detect_intent(said) is step
 
+    async def test_a_tenants_own_vocabulary_moves_the_call(self):
+        """FOUND BY DRIVING A REAL CALL. "What have you got available right now" is the one
+        question a GPU cloud exists to answer, and the guide step never fired on it: the intent
+        patterns know how buyers ask in general, and cannot know that "available" is a word
+        about capacity. The tenant had already written it down in the tour stop's `answers`.
+        """
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import TourStop
+
+        spec = replace(
+            liv_spec(),
+            tour=(
+                TourStop(
+                    url="https://demo.example/#capacity",
+                    label="what is free right now",
+                    shows="live capacity",
+                    answers=("available", "capacity", "region"),
+                ),
+            ),
+        )
+        agenda, tools = build(spec=spec)
+        await collect(agenda.begin())
+        await collect(agenda.respond("what have you got available right now?"))
+
+        assert agenda.step is Step.GUIDE
+        assert any("demo.example" in call["url"] for call in tools.named("research.browse"))
+
+    async def test_naming_a_competitor_opens_the_comparison(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        events = await collect(agenda.respond("we already use a chat widget for this"))
+        assert agenda.step is Step.COMPARE
+        assert panels(events, "comparison")
+
     def test_ordinary_conversation_does_not_jump_the_call(self):
         assert detect_intent("we have about forty inbound calls a week") is None
 

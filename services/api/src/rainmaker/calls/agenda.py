@@ -515,7 +515,7 @@ class Agenda:
         # tour means the NEXT stop, and a step that only runs on arrival would have answered it
         # by talking about the page already on screen. Asking the price twice, by contrast,
         # should not rebuild the same quote — the model answers that.
-        wanted = detect_intent(text)
+        wanted = detect_intent(text) or self._tenant_intent(text)
         if wanted and (wanted is not self.step or wanted is Step.GUIDE):
             async for event in self._enter(wanted, said=text):
                 yield event
@@ -636,6 +636,31 @@ class Agenda:
                 budget.mark("tts")
             yield Spoke(clip)
         yield Finished(TurnResult(transcript="", response=line, budget=budget))
+
+    def _tenant_intent(self, text: str) -> Step | None:
+        """The step a question implies, in THIS tenant's vocabulary.
+
+        `detect_intent` knows how buyers ask in general — "show me", "how much". It cannot know
+        that "what have you got available right now" is a request to see the capacity page,
+        because "available" is a word about GPUs and this agent could be selling anything.
+
+        THE TENANT ALREADY WROTE THE VOCABULARY DOWN. Every tour stop declares what it answers
+        and every competitor has a name, and both were being used only to pick between steps
+        once a step had been chosen. Consulted here, they choose the step. Found by driving a
+        real call and watching the guide never fire on the one question the agent exists to
+        answer.
+        """
+        spec = self.session.spec
+        if spec is None:
+            return None
+        lowered = text.lower()
+        if any(
+            topic and topic.lower() in lowered for stop in spec.tour for topic in stop.answers
+        ):
+            return Step.GUIDE
+        if any(rival.name.lower() in lowered for rival in spec.competitors):
+            return Step.COMPARE
+        return None
 
     # ── the steps that do something ─────────────────────────────────────
     async def _open(self) -> AsyncIterator[AgendaEvent]:

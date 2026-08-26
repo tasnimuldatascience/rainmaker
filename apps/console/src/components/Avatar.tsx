@@ -88,9 +88,28 @@ export interface AvatarProps {
   /** True while the prospect is talking — switches to the listening pose. */
   listening?: boolean;
   size?: number;
+  /**
+   * Current output loudness, 0..1, polled every frame.
+   *
+   * THE SHAPE IS A GUESS AND THE OPENING IS NOT. Visemes derived from spelling are the weakest
+   * link in this rig — English orthography barely predicts pronunciation — but the amplitude of
+   * the audio actually playing is measured, and it is the half a viewer notices. Driving the
+   * opening from it means the mouth moves when there is sound and stops when there is not,
+   * which is the difference between a face talking and a face chewing.
+   */
+  level?: () => number;
+  /** Fill the parent instead of taking a fixed size. */
+  fill?: boolean;
 }
 
-export function Avatar({ speech = "", speaking, listening = false, size = 260 }: AvatarProps) {
+export function Avatar({
+  speech = "",
+  speaking,
+  listening = false,
+  size = 260,
+  level,
+  fill = false,
+}: AvatarProps) {
   const visemes = useMemo(() => textToVisemes(speech), [speech]);
   const [viseme, setViseme] = useState<Viseme>("rest");
   const [blink, setBlink] = useState(false);
@@ -163,17 +182,40 @@ export function Avatar({ speech = "", speaking, listening = false, size = 260 }:
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const [mw, mh, curve, lift] = MOUTH[viseme];
+  const [mw, mhShape, curve, lift] = MOUTH[viseme];
+
+  // The measured loudness, smoothed. Read on an animation frame and kept in a ref so the SVG
+  // re-renders on the viseme tick rather than sixty times a second.
+  const loud = useRef(0);
+  useEffect(() => {
+    if (!level) return;
+    let frame = 0;
+    const tick = () => {
+      const now = level();
+      // Asymmetric smoothing: a mouth opens faster than it closes, and a symmetric filter makes
+      // speech look like it is being mumbled underwater.
+      loud.current += (now - loud.current) * (now > loud.current ? 0.55 : 0.18);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [level]);
+
+  // Amplitude scales the opening between a quarter of the viseme's height and slightly past it,
+  // so a loud vowel is visibly wider than a quiet one and silence closes the mouth completely.
+  const gain = level ? 0.25 + Math.min(loud.current, 1) * 0.95 : 1;
+  const mh = speaking ? Math.max(mhShape * gain, 1.2) : mhShape;
   const tilt = listening ? 4 : 0;
 
   return (
     <svg
-      width={size}
-      height={size}
+      width={fill ? "100%" : size}
+      height={fill ? "100%" : size}
       viewBox="0 0 200 200"
+      preserveAspectRatio="xMidYMid slice"
       role="img"
       aria-label={speaking ? "Liv, the AI agent, speaking" : "Liv, the AI agent, listening"}
-      style={{ display: "block" }}
+      style={{ display: "block", background: "#171320" }}
       /* Rig state exposed on the element. Screenshot capture and future rendering tests can
          wait for a specific frame instead of sleeping and hoping -- the previous shots caught
          her mid-blink on a closed viseme, which made a working rig look static. */
