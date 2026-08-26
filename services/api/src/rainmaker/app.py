@@ -32,6 +32,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .calls.agenda import Agenda, Panel, Phase
+from .calls.avatar import build_avatar
+from .calls.avatar import describe as describe_avatar
 from .calls.intake import InvalidEmail, parse_contact
 from .calls.pipeline import (
     TURN_BUDGET_MS,
@@ -69,6 +71,7 @@ class AppState:
     llm: LanguageModel
     tts: TextToSpeech
     tools: ToolBroker
+    avatar: Any
 
 
 state = AppState()
@@ -105,6 +108,7 @@ async def lifespan(app: FastAPI):
 
     state.llm = build_language_model(os.environ.get("RAINMAKER_BRAIN", "auto"))
     state.tts = build_voice(os.environ.get("RAINMAKER_VOICE", "auto"))
+    state.avatar = build_avatar(os.environ.get("RAINMAKER_AVATAR", "auto"))
     warming = asyncio.create_task(_warm_engines())
 
     # The tool servers are subprocesses and must be started and stopped from the SAME task —
@@ -290,6 +294,7 @@ def create_app() -> FastAPI:
         """
         return {
             "engines": engines(state.llm, state.tts),
+            "avatar": describe_avatar(state.avatar),
             "tools": state.tools.describe(),
             "disclosure": Disclosure().spoken,
             "budget_ms": TURN_BUDGET_MS,
@@ -318,7 +323,7 @@ def create_app() -> FastAPI:
         await ws.accept()
 
         stt = ClientSpeechToText()
-        pipeline = CallPipeline(stt=stt, llm=state.llm, tts=state.tts)
+        pipeline = CallPipeline(stt=stt, llm=state.llm, tts=state.tts, avatar=state.avatar)
         session = CallSession(
             pipeline,
             stt,
@@ -409,6 +414,7 @@ def create_app() -> FastAPI:
                             "type": "disclosure",
                             "text": session.pipeline.disclosure.spoken,
                             "engines": engines(state.llm, state.tts),
+                            "avatar": describe_avatar(state.avatar),
                             "contact": {
                                 "email": contact.email,
                                 "domain": contact.domain,
@@ -428,6 +434,7 @@ def create_app() -> FastAPI:
                             "type": "disclosure",
                             "text": session.pipeline.disclosure.spoken,
                             "engines": engines(state.llm, state.tts),
+                            "avatar": describe_avatar(state.avatar),
                         }
                     )
                     turn = asyncio.create_task(send_events(session.open()))

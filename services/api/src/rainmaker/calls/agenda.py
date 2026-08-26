@@ -469,7 +469,7 @@ class Agenda:
         """Let the model say something for the current step."""
         self._retarget(self.step)
         reply = ""
-        async for event in self.session.respond(prompt):
+        async for event in self.session.respond(prompt, internal=True):
             if isinstance(event, Finished):
                 reply = event.result.response
             yield event

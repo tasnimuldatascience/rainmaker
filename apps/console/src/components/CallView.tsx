@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CallState, Panels, Step } from "../lib/call";
 import { LiveCall } from "../lib/call";
 import type { LocalStore } from "../lib/store";
-import { Avatar } from "./Avatar";
+import { Portrait } from "./Portrait";
 
 const STAGE_COLOR: Record<string, string> = {
   stt: "var(--accent)",
@@ -156,11 +156,11 @@ export function CallView({ store }: { store: LocalStore }) {
               </div>
 
               <div className="pip" data-speaking={state.speaking}>
-                <Avatar
-                  speech={state.caption}
+                <Portrait
+                  level={() => call.level()}
                   speaking={state.speaking}
                   listening={!state.speaking}
-                  size={168}
+                  fill
                 />
                 <span className="pip-name">
                   <span className="live-dot" />

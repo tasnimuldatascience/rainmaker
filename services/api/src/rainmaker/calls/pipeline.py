@@ -33,12 +33,12 @@ costs roughly 340ms of fixed setup per call on this CPU regardless of how short 
 Moving synthesis to the GPU is the obvious next move and is NOT done here — onnxruntime-gpu is
 another dependency and another install step, and this repository's rule is that a clone runs.
 
-WHAT IS VERIFIED AND WHAT IS NOT — stated here rather than discovered by a reader:
-the orchestration, budget accounting, disclosure enforcement and both local engines are
-implemented, tested, and run end to end; the numbers above came out of that path. The
-photo-realistic avatar (MuseTalk over a LivePortrait idle loop) is adapter code that has NOT
-been run here: it needs several GB of weights and a persistent GPU service. `PlaceholderAvatar`
-is the default so the system runs anywhere, and the README carries the same distinction.
+WHAT IS VERIFIED AND WHAT IS NOT — stated here rather than discovered by a reader: the
+orchestration, budget accounting, disclosure enforcement and both local engines are implemented,
+tested, and run end to end; the numbers above came out of that path. The face is the exception
+and `calls/avatar.py` carries that argument in full — a photoreal still lit by the real output
+level is the default, hosted lip-sync is a key away and has not been run here, and MuseTalk was
+tried and does not run on this hardware at all.
 """
 
 from __future__ import annotations
@@ -382,7 +382,11 @@ class CallPipeline:
         return self.disclosure.spoken
 
     async def stream_turn(
-        self, audio: AsyncIterator[bytes], context: dict | None = None
+        self,
+        audio: AsyncIterator[bytes],
+        context: dict | None = None,
+        *,
+        announce: bool = True,
     ) -> AsyncIterator[TurnEvent]:
         """One turn, emitting each piece the instant it exists.
 
@@ -408,7 +412,13 @@ class CallPipeline:
         transcript = ""
         async for text, final in self.stt.stream(audio):
             transcript = text
-            yield Heard(text, final)
+            # `announce=False` for a turn the AGENDA started rather than the prospect. The
+            # steering text is a stage direction — "(You are screen-sharing their pricing
+            # page...)" — and emitting it as `Heard` put it on screen as the caption and into
+            # the transcript as something the prospect had said. The instructions to the actor
+            # were being read out to the audience.
+            if announce:
+                yield Heard(text, final)
             if final:
                 break
         if getattr(self.stt, "measured", True):
@@ -479,6 +489,7 @@ class CallPipeline:
         self, audio: AsyncIterator[bytes], context: dict | None = None
     ) -> TurnResult:
         """The whole turn, awaited. Built on `stream_turn` so there is one turn loop, not two."""
+
         result: TurnResult | None = None
         async for event in self.stream_turn(audio, context):
             if isinstance(event, Finished):

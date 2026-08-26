@@ -125,6 +125,49 @@ class Prospect:
         return head + "\n" + "\n".join(f"- {fact}" for fact in self.facts)
 
 
+#: A published price outside this range is an extraction artifact, not a price. Stripe's pricing
+#: page yielded "0.01" — the cents half of "2.9% + $0.30" — and the agent was handed it as
+#: "their published price, in dollars: 0.01". Reading that back to someone who works at Stripe
+#: is worse than knowing nothing about their pricing, so it is dropped rather than hedged.
+PLAUSIBLE_PRICE = (1.0, 100_000.0)
+
+#: Longer than this and it is a paragraph that happened to sit near a careers link, not a job
+#: title. Observed: "AI is replatforming the global economy, Products and pricing Pricing Atlas
+#: Authorizatio" arriving as an open role.
+MAX_JOB_TITLE_CHARS = 48
+
+
+def _sourced_price(enrichment: dict[str, Any], out: list[str]) -> None:
+    node = enrichment.get("published_price_usd")
+    if not isinstance(node, dict):
+        return
+    try:
+        price = float(node.get("value"))
+    except (TypeError, ValueError):
+        return
+    low, high = PLAUSIBLE_PRICE
+    if low <= price <= high:
+        out.append(f"Their published price, in dollars: {price:g}")
+
+
+def _job_title(hiring: Any) -> str:
+    """One open role, or nothing if what was scraped is not a job title.
+
+    The research agent takes titles from link text on a careers page, and careers pages are full
+    of link text that is not a job title. A wrong fact spoken confidently to the person who works
+    there is the most expensive kind of wrong this product has.
+    """
+    if not isinstance(hiring, dict):
+        return ""
+    title = str(hiring.get("title") or "").strip()
+    if not (2 <= len(title) <= MAX_JOB_TITLE_CHARS):
+        return ""
+    # A title is a noun phrase. Sentence punctuation means a sentence came along with it.
+    if any(mark in title for mark in (". ", ", ", ";", "!", "?")):
+        return ""
+    return title
+
+
 #: Values the research agent uses to mean "we could not tell". Passing them to the model as
 #: facts produces an agent that says "your company size is unknown" out loud.
 _EMPTY_VALUES = {"unknown", "none", "n/a", ""}
@@ -162,13 +205,13 @@ def facts_from_enrichment(enrichment: dict[str, Any], *, limit: int = 12) -> lis
     sourced("industry", "Industry")
     sourced("size", "Company size")
     sourced("pricing_model", "How they charge")
-    sourced("published_price_usd", "Their published price, in dollars")
+    _sourced_price(enrichment, out)
 
     tech = [t.get("name") for t in enrichment.get("tech") or [] if t.get("name")]
     if tech:
         out.append("Technology on their site: " + ", ".join(tech[:8]))
 
-    roles = [h.get("title") for h in enrichment.get("hiring") or [] if h.get("title")]
+    roles = [r for r in (_job_title(h) for h in enrichment.get("hiring") or []) if r]
     if roles:
         out.append(f"Currently hiring ({len(roles)} open roles): " + ", ".join(roles[:5]))
 
@@ -273,7 +316,11 @@ class CallSession:
         )
 
     async def respond(
-        self, text: str, *, budget_hints: dict[str, float] | None = None
+        self,
+        text: str,
+        *,
+        budget_hints: dict[str, float] | None = None,
+        internal: bool = False,
     ) -> AsyncIterator[TurnEvent]:
         """Answer one thing the prospect said, whether they typed it or spoke it.
 
@@ -285,14 +332,18 @@ class CallSession:
         if not text:
             return
 
-        if _wants_human(text):
+        # A stage direction is never a request for a human, and running the check on one means
+        # a direction containing the word "person" hands the call over.
+        if not internal and _wants_human(text):
             async for event in self._hand_off(text):
                 yield event
             return
 
         self.stt.offer(text, final=True)
         result = None
-        async for event in self.pipeline.stream_turn(_no_audio(), self.context()):
+        async for event in self.pipeline.stream_turn(
+            _no_audio(), self.context(), announce=not internal
+        ):
             if isinstance(event, Finished):
                 result = event.result
                 for stage, ms in (budget_hints or {}).items():
@@ -301,7 +352,11 @@ class CallSession:
 
         if result is not None:
             reply = result.response.strip()
-            self.record("prospect", text)
+            # The transcript is what was SAID. A stage direction was not said, so it is kept out
+            # of it — but it stays in `history`, because the model's next turn needs the reply
+            # it just gave to have something to follow.
+            if not internal:
+                self.record("prospect", text)
             self.record("agent", reply, budget=result.budget.report())
             self.history.append({"role": "user", "content": text})
             if reply:

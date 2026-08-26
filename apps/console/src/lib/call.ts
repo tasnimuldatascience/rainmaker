@@ -174,6 +174,10 @@ export class LiveCall {
   private timers: number[] = [];
   /** Where in the AudioContext's timeline the next clip should start. */
   private nextStart = 0;
+  /** Taps the output so the face can move to the audio actually coming out. */
+  private analyser: AnalyserNode | null = null;
+  private levelBuffer: Uint8Array<ArrayBuffer> | null = null;
+  private smoothed = 0;
   private recognition: RecognitionLike | null = null;
   private listeners = new Set<(state: CallState) => void>();
   private state: CallState = { ...IDLE, micSupported: recognitionCtor() !== null };
@@ -436,9 +440,48 @@ export class LiveCall {
         window.AudioContext ??
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new Ctor();
+      // Everything is routed through an analyser so the face has something REAL to move to.
+      // A small FFT: this is used for loudness, not spectrum, and a big window adds latency
+      // between the sound and the movement, which is the one thing that must not happen.
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 256;
+      // Typed against a plain ArrayBuffer: lib.dom now narrows getByteTimeDomainData to
+      // Uint8Array<ArrayBuffer>, and the default Uint8Array is over ArrayBufferLike.
+      this.levelBuffer = new Uint8Array(new ArrayBuffer(this.analyser.fftSize));
+      this.analyser.connect(this.ctx.destination);
     }
     if (this.ctx.state === "suspended") void this.ctx.resume();
     return this.ctx;
+  }
+
+  /**
+   * How loud she is right now, 0 to 1.
+   *
+   * READ, NOT PUSHED. Loudness changes every frame, and putting it in React state would
+   * re-render the whole call view sixty times a second to move one element a pixel. The face
+   * polls this from its own animation frame and writes styles directly.
+   *
+   * Returns 0 when the browser voice is speaking, because `speechSynthesis` output does not go
+   * through the audio graph and there is nothing real to measure. Inventing a wobble there
+   * would be animating to a number nobody can hear.
+   */
+  level(): number {
+    if (!this.analyser || !this.levelBuffer || !this.state.speaking) {
+      this.smoothed *= 0.85;
+      return this.smoothed;
+    }
+    this.analyser.getByteTimeDomainData(this.levelBuffer);
+    let sum = 0;
+    for (let i = 0; i < this.levelBuffer.length; i += 1) {
+      const centred = (this.levelBuffer[i]! - 128) / 128;
+      sum += centred * centred;
+    }
+    const rms = Math.sqrt(sum / this.levelBuffer.length);
+    // Asymmetric smoothing: quick to rise so a consonant lands on time, slow to fall so the
+    // face does not flicker between syllables.
+    const scaled = Math.min(1, rms * 3.2);
+    this.smoothed = scaled > this.smoothed ? scaled : this.smoothed * 0.82 + scaled * 0.18;
+    return this.smoothed;
   }
 
   private async play(clip: ClipMessage): Promise<void> {
@@ -462,7 +505,7 @@ export class LiveCall {
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
+    source.connect(this.analyser ?? ctx.destination);
 
     // A small lead so the first clip is not scheduled in the past — decoding took real time.
     const startAt = Math.max(ctx.currentTime + 0.03, this.nextStart);
@@ -530,6 +573,7 @@ export class LiveCall {
       }
     });
     this.sources = [];
+    this.smoothed = 0;
     this.timers.forEach((timer) => window.clearTimeout(timer));
     this.timers = [];
     this.nextStart = this.ctx ? this.ctx.currentTime : 0;
@@ -551,6 +595,8 @@ export class LiveCall {
     this.socket = null;
     void this.ctx?.close();
     this.ctx = null;
+    this.analyser = null;
+    this.levelBuffer = null;
     this.set({ phase: "ended", listening: false, partial: "" });
   }
 }

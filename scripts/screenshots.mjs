@@ -66,40 +66,63 @@ await shot("research", async (p) => {
 await shot("call", async (p) => {
   await setTheme("dark");
   await p.click('.nav button:has-text("Live call")');
-  await p.click('button:has-text("Start call")');
 
-  // The disclosure is a real turn now, so wait for it to finish arriving rather than sleeping.
-  await p.waitForSelector('.turn:has-text("not a human")', { timeout: 20000 });
+  // The front door is an email, not a button: everything she knows before she speaks comes from
+  // the domain in it, so the shot has to start the way the product does.
+  await p.fill(".intake input", "dana.whitfield@stripe.com");
+  await p.click('button:has-text("Start the call")');
 
-  // Then ask something, so the shot shows a reply the model actually produced. The engines may
-  // still be loading on a cold server -- the reply can take a few seconds and that is honest.
-  await p.fill(".composer input", "We already run Postgres, why would we need you?");
+  // She discloses, reads their site, then greets using something she found. Three turns.
+  await p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
+    timeout: 120000,
+  });
+
+  // Then ask to see it, so the shot shows the thing that makes this a demo rather than a chat:
+  // the prospect's OWN page, opened live, with Liv over it.
+  await p.fill(".composer input", "show me what it looks like");
   await p.click('button:has-text("Send")');
+  await p.waitForSelector(".screen-frame", { timeout: 120000 });
 
-  // The latency strip only exists once the turn reports `done`, and audio keeps playing for a
-  // second or two after that -- so wait for the strip FIRST and the mouth second. Waiting only
-  // for the mouth caught the frame before the reply landed, and published a screenshot of the
-  // instrument panel saying "say something to see where the time went" during a reply.
-  await p.waitForSelector(".budget", { timeout: 45000 });
-
-  // Then wait for a GOOD FRAME rather than sleeping and hoping: she must be speaking, on an open
-  // viseme, and not mid-blink. Sleeping caught her blinking on a closed mouth twice, which made
-  // a working rig look static in the one image people actually look at.
+  // Wait for a frame where she is AUDIBLY speaking: `--loud` is the RMS of the audio playing at
+  // that instant, so a high value means the shutter caught her mid-word rather than in the gap
+  // between two clauses.
   await p
     .waitForFunction(
       () => {
-        const el = document.querySelector(".pip svg[data-speaking]");
-        return (
-          el?.getAttribute("data-speaking") === "true" &&
-          el.getAttribute("data-blink") === "false" &&
-          Number(el.getAttribute("data-mouth-open") ?? 0) > 12
-        );
+        const el = document.querySelector(".pip .portrait");
+        if (el?.getAttribute("data-speaking") !== "true") return false;
+        return Number(getComputedStyle(el).getPropertyValue("--loud")) > 0.2;
       },
       null,
-      { timeout: 45000, polling: 30 },
+      { timeout: 45000, polling: 20 },
     )
-    .catch(() => console.warn("no open-mouth frame captured within the window"));
+    .catch(() => console.warn("no loud frame captured within the window"));
 }, 0);
+
+// What she found, and the times she actually has. Two more panels from the same call, because
+// the research and the booking are the parts a reader does not believe without seeing.
+await shot("research-live", async (p) => {
+  await setTheme("dark");
+  await p.click('.nav button:has-text("Live call")');
+  await p.fill(".intake input", "dana.whitfield@stripe.com");
+  await p.click('button:has-text("Start the call")');
+  await p.waitForSelector(".fact-list li", { timeout: 120000 });
+}, 400);
+
+await shot("booking", async (p) => {
+  await setTheme("dark");
+  await p.click('.nav button:has-text("Live call")');
+  await p.fill(".intake input", "dana.whitfield@stripe.com");
+  await p.click('button:has-text("Start the call")');
+  await p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
+    timeout: 120000,
+  });
+  await p.fill(".composer input", "can we book something");
+  await p.click('button:has-text("Send")');
+  await p.waitForSelector(".slot", { timeout: 120000 });
+  await p.click(".slot");
+  await p.waitForSelector(".big-tick", { timeout: 120000 });
+}, 400);
 
 // The offline shot. This is the product's actual claim, so it is captured against a genuinely
 // severed connection rather than mocked: route abort kills the socket and every fetch, then

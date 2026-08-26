@@ -400,6 +400,10 @@
        more distracting than the words are useful. Fixed width, fixed height, text left. */
     justify-self: start; align-self: end;
     inline-size: min(68%, 62ch); min-block-size: 4.25rem;
+    /* Bounded, and it took a leak to notice. A stage direction escaped into the caption and the
+       bubble grew to a dozen lines, pushing the composer off the bottom of the stage. Even with
+       that fixed, a long reply must not be able to break the layout. */
+    max-block-size: 8.5rem; overflow-y: auto;
     padding: var(--s-3) var(--s-4); border-radius: var(--r-lg);
     background: var(--surface-1); border: 1px solid var(--line);
     box-shadow: var(--shadow-2); font-size: var(--t-lg); line-height: 1.5;
@@ -527,6 +531,44 @@
     background: var(--surface-3); border: 1px solid var(--line);
     font-family: var(--mono); font-size: var(--t-xs); line-height: 1.65;
     white-space: pre-wrap; overflow-x: auto;
+  }
+
+  /* The portrait. All of the motion below is driven by real output loudness or by a slow
+     camera drift -- nothing pretends to be lip movement, which is why it does not look dead. */
+  .portrait {
+    position: relative; border-radius: var(--r-md); overflow: hidden;
+    background: var(--surface-3); isolation: isolate;
+    --drift-x: 0px; --drift-y: 0px; --scale: 1; --loud: 0;
+  }
+  .portrait-img {
+    inline-size: 100%; block-size: 100%; object-fit: cover; display: block;
+    transform: translate3d(var(--drift-x), var(--drift-y), 0) scale(var(--scale));
+    transform-origin: 50% 42%;
+    /* Warms and lifts with the voice. A face lit as though it is speaking reads as speaking. */
+    filter: brightness(calc(1 + var(--loud) * 0.10)) saturate(calc(1 + var(--loud) * 0.14));
+    will-change: transform, filter;
+  }
+  .portrait-bloom {
+    position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    background: radial-gradient(70% 55% at 50% 62%,
+      color-mix(in oklab, var(--agent) 42%, transparent), transparent 70%);
+    opacity: calc(var(--loud) * 0.5);
+  }
+  .portrait-ring {
+    position: absolute; inset: 0; pointer-events: none; z-index: 2; border-radius: inherit;
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--agent) 70%, transparent);
+    opacity: calc(var(--loud) * 0.85);
+  }
+  .portrait[data-listening="true"] .portrait-ring {
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--won) 45%, transparent);
+    opacity: 0.5;
+  }
+  /* Inside the floating window the portrait IS the window: a square image centred in a 4:3
+     frame leaves two grey wedges that read as a broken layout. */
+  .pip .portrait { inline-size: 100%; block-size: 100%; border-radius: 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .portrait-img { transform: none; }
   }
 
   .engine-row { display: flex; flex-wrap: wrap; gap: var(--s-2); }

@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-286%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-305%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -20,12 +20,15 @@
 
 ## What is this?
 
-Three things a sales team needs, built to work together:
+**Give it your work email and it runs your first sales call.** It reads your company's website
+while you watch, opens your own pages and talks you through them, books a meeting in a real
+calendar, and shows you a price — then writes the whole thing into the pipeline.
 
 | Part | What it does |
 |---|---|
-| **Research** | Reads a company's public website and pulls out useful facts — how they price, what they use, who they are hiring |
-| **AI caller** | An agent you can type to or talk to. It answers out loud, says it is AI up front, and hands over to a person when asked — running a language model and a voice on your own machine |
+| **The call** | An AI account executive you can type to or talk to. She answers out loud, says she is an AI before anything else, and stops selling the moment you ask for a person |
+| **Research** | Reads a prospect's public website live, on screen, and only lets her state what it actually found |
+| **Tools** | A calendar, a CRM, a browser and a mailbox — reached over MCP, so a customer's own systems drop in |
 | **Sales dashboard** | Where reps track their deals — **and it works with no internet at all** |
 
 ---
@@ -81,6 +84,9 @@ pip install -e "services/api[brain]"      # the model: torch, ~2.5GB
 ```
 
 Restart the API and `/api/calls/health` will say what loaded. So will the console.
+
+The four tool servers need no setup — the API starts them itself, and the calendar and CRM work
+offline like the rest of the console.
 
 Optional, and everything works without them:
 
@@ -175,45 +181,41 @@ and the page limit counts *attempts* rather than successes.
 
 ---
 
-## The AI caller
+## The call
 
-<img src="docs/img/call.png" alt="Live call: the agent mid-reply, with the per-stage latency budget" width="100%">
+<img src="docs/img/call.png" alt="Liv mid-call, screen-sharing the prospect's own pricing page" width="100%">
 
-**Type to her, or hold the talk button and speak. She answers out loud either way.** The reply
-above came out of a 1.5-billion-parameter model on the laptop that took the screenshot, and the
-voice is a 330MB synthesiser running on its CPU. Nothing left the machine.
+That is one screenshot of one real call. The email `dana.whitfield@stripe.com` went in; everything
+after it happened by itself.
 
-| Part | What runs | Where |
-|---|---|---|
-| Thinking | **Qwen2.5-1.5B-Instruct**, streamed token by token | your GPU, or your CPU |
-| Speaking | **Kokoro-82M**, synthesised clause by clause | your CPU |
-| Hearing | the browser's own speech recognition | the browser |
+**1 — She reads their site before she says a word.** Not a lookup: a browser opens their pages and
+pulls out facts with the page each came from.
 
-The first two are optional. Without them the agent still holds a conversation — it answers from
-a small grounded script and the browser speaks the words — and the console's engine badge says
-which of the two it is, because a demo that has quietly degraded and does not mention it is how
-a reviewer concludes the product always sounded like that.
+<img src="docs/img/research-live.png" alt="Nine facts read live from stripe.com" width="100%">
 
-### Why it does not pause awkwardly
+**2 — Then she shows them their own website.** That screenshot at the top is stripe.com/pricing,
+opened live and narrated. The browsing is not a background job — it is the demo, because reading a
+prospect's site before a call is the work she is replacing.
 
-In conversation people tolerate about 300 milliseconds of silence. Past about 800, a pause stops
-sounding like thinking and starts sounding broken.
+**3 — She books out of a real calendar.**
 
-The trick is that **nothing waits for the previous thing to finish**. Synthesis starts on the
-first few words of the reply rather than the first sentence, and the audio for clause two is
-produced while clause one is still playing. Measured on the same 175-character reply:
+<img src="docs/img/booking.png" alt="Real availability, offered and booked" width="100%">
 
-| | Silence before the first sound |
-|---|---:|
-| Synthesise the whole reply, then play it | 3007ms |
-| Synthesise the first clause first | **407ms** |
+**4 — Then the price**, sized to what she found, on screen and never spoken. And the whole call is
+written into the pipeline as CRDT ops through the CRM tool server, so a rep's laptop sees it like
+any other edit.
 
-Fifteen real turns on that laptop: **850ms median** from pressing send to hearing her, of which
-the model is ~140ms and the voice ~720ms. The console shows the breakdown per turn, so when it
-goes over budget you can see which stage spent it. On this hardware it usually does go slightly
-over, and synthesis is why — see [ARCHITECTURE.md](ARCHITECTURE.md).
+### The graph decides, the model writes
 
-### Two things it will not do
+The step the call is on, which tool fires, and every sentence where being wrong costs something —
+the disclosure, the times offered, the booking confirmation, the handoff — are all decided in
+code. The model writes the greeting, the questions, and the narration.
+
+That split is the whole design. A model that phrases a question awkwardly costs a moment. A model
+that decides on its own to confirm a meeting books nothing and promises everything, and
+Qwen2.5-1.5B is nowhere near reliable enough to be trusted with the difference.
+
+Two things she will not do, both enforced rather than requested:
 
 ```python
 Disclosure(required=False)
@@ -221,29 +223,66 @@ Disclosure(required=False)
 #                  to, that is a legal question, not a configuration one.
 ```
 
-An AI on a sales call that does not admit it is an AI is the mistake that ends a company. Making
-it impossible to switch off is cheaper than making it a setting somebody eventually switches off.
+Ask for a human and she stops selling immediately — one fixed line, and the model is never
+consulted about whether to agree. She is also held to two sentences a turn in code: asked
+politely, the model wrote four to six every time and got cut off mid-word by the token limit.
 
-The second is the handoff. **Ask for a human and she stops selling immediately** — one fixed
-line, and the model is never consulted about whether to agree. Asking a small model to abandon
-its objective on request is a bet, and the stake is the worst thing this product can do.
+### Her tools are a protocol, not an integration
 
-She is also held to two sentences per turn, in code rather than in the prompt. Asked politely,
-the model wrote four to six every time and got cut off mid-word by the token limit.
+Four MCP servers, each runnable on its own in any MCP host:
 
-### The face
+```bash
+python -m rainmaker.mcp.servers.calendar    # availability, booking, cancellation
+python -m rainmaker.mcp.servers.crm         # call outcomes, as CRDT ops
+python -m rainmaker.mcp.servers.research    # a page's text, and a picture of it
+python -m rainmaker.mcp.servers.email       # the follow-up. Off without SMTP
+```
 
-**What ships is a drawn face**, not a photo-realistic one, and it moves to the audio that is
-actually playing — the mouth shapes come from the clause being spoken and stop when the sound
-does. What sells it is not the mouth: it is irregular blinking, constant small movement, eyes
-that drift and return, and a listening pose so she never freezes between sentences.
+They run as separate processes so a third-party server that hangs cannot take a live call with
+it, and every call has a deadline. Swapping the local calendar for a customer's Google Calendar
+is a line in `mcp.toml` — the point of building it this way rather than as a function she calls.
+
+The calendar will not sell the same slot twice, and that is enforced by a unique index rather
+than by code, because listing times and booking one are separated by a conversation.
+
+### Why it does not pause awkwardly
+
+People tolerate about 300ms of silence. Past about 800, a pause stops sounding like thinking.
+
+Nothing waits for the previous thing to finish: synthesis starts on the first few words of a
+reply, and clause two is produced while clause one is playing. Measured on the same 175-character
+reply:
+
+| | Silence before the first sound |
+|---|---:|
+| Synthesise the whole reply, then play it | 3007ms |
+| Synthesise the first clause first | **407ms** |
+
+Fifteen real turns: **850ms median** from pressing send to hearing her — the model ~140ms, the
+voice ~720ms. The console shows the breakdown per turn, and on this hardware it usually goes
+slightly over budget. Synthesis is why, and [ARCHITECTURE.md](ARCHITECTURE.md) says why the GPU
+fix was not taken.
+
+### Her face
+
+She is a **photoreal portrait of nobody** — a StyleGAN face from a public-domain set, not a real
+person's likeness. It brightens and moves with the real loudness of the audio playing at that
+instant, and it does not pretend to lip-sync.
+
+That last part is deliberate. Warping the mouth of a still photograph is guesswork, and the
+uncanny valley is steepest exactly there: a nearly-right face moving slightly wrong reads as a
+corpse, while the same face holding still reads as a video call with a frozen frame, which
+everyone sees every week. Real lip-sync is a provider swap — set a streaming-avatar key and the
+same slot renders a talking head.
 
 > [!IMPORTANT]
-> **What is running and what is not.** The conversation, the voice, the timing, the disclosure,
-> the handoff, the syncing, the research and the dashboard are all built and running — that
-> screenshot is the live system mid-sentence, and the numbers above came off the wire. A
-> **photo-realistic** face (MuseTalk over LivePortrait) is wired up behind the same interface
-> but **has not been run here**: it needs several gigabytes of weights and a dedicated GPU.
+> **What is running and what is not.** The conversation, the voice, the research, the browsing,
+> the tools, the timing, the disclosure and the handoff are all built and running — the
+> screenshots are one live call and the numbers came off the wire. The hosted talking-head
+> provider is reachable through the same interface and **has not been run here**: there is no key.
+> **MuseTalk was tried and does not run on this machine at all** — it pins `torch 2.0.1+cu118`,
+> whose newest architecture is `sm_90`, and this GPU is `sm_120`. `calls/avatar.py` has the
+> details rather than leaving an adapter nobody can run.
 
 ---
 
@@ -266,10 +305,10 @@ that drift and return, and a listening pose so she never freezes between sentenc
 
 ```bash
 npm test                       # 49 tests — syncing, text editing, the call rail
-pytest                         # 237 tests — research, syncing, the API, the live call, the tools
+pytest                         # 256 tests — research, syncing, the API, the live call, the tools
 ```
 
-286 tests in total. None of them load a language model: a test that spends six seconds on
+305 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
@@ -283,6 +322,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
 | `test_agenda.py` | That she researches before she greets, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
 | `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, and that she will not email anyone who was not on the call |
+| `test_avatar.py` | That the face admits what it is: synthetic, and not lip-syncing unless a provider is actually doing it |
 | `test_readme.py` | That these counts are the counts. A badge is an image, and nobody proofreads an image |
 
 ### The bug the API tests found immediately
@@ -339,11 +379,19 @@ matched.
 
 ```
 packages/crdt          the offline-syncing data structures     (TypeScript)
-apps/console           the dashboard                            (React)
+apps/console           the dashboard and the call surface       (React)
 services/api
+  calls/
+    intake.py          an email address becomes a domain to research
+    agenda.py          the plot: which step, which tool, which words are fixed
+    pipeline.py        the turn loop, the latency budget, the disclosure
+    providers.py       the local model and the local voice
+    avatar.py          which face is on screen, and what it admits to
+  mcp/
+    client.py          spawns the tool servers, routes calls, enforces deadlines
+    servers/           calendar, crm, research, email — each runnable on its own
   research/            reading websites and extracting facts
   sync/                collecting and relaying changes
-  calls/               the call loop, timing, and disclosure
   crm/                 turning changes into a readable view
 ```
 

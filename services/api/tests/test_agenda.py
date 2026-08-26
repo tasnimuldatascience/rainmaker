@@ -22,7 +22,7 @@ from rainmaker.calls.intake import FREE_PROVIDERS, InvalidEmail, parse_contact
 from rainmaker.calls.naming import clean_company_name
 from rainmaker.calls.pipeline import CallPipeline, Spoke
 from rainmaker.calls.providers import ClientSpeechToText, ScriptedLanguageModel, SilentTextToSpeech
-from rainmaker.calls.session import CallSession
+from rainmaker.calls.session import CallSession, facts_from_enrichment
 
 
 # ───────────────────────────────────────────────────────────── the front door
@@ -489,3 +489,84 @@ class TestWhoseWebsiteItIs:
         assert narration, "the narration prompt did not survive"
         assert "Corvus Data" in narration[0]
         assert "not to Rainmaker" in narration[0]
+
+
+class TestTheAudienceNeverHearsTheStageDirections:
+    """The agenda steers the model with instructions — "(You are screen-sharing their pricing
+    page, never call it 'our' page...)". Those went through the same path as a prospect's words,
+    so they were emitted as `Heard`, rendered as the caption, and written into the transcript as
+    something the prospect had said. The instructions to the actor were read out to the audience.
+    """
+
+    async def test_a_steering_prompt_is_not_reported_as_something_they_said(self):
+        from rainmaker.calls.pipeline import Heard
+
+        agenda, _ = build()
+        events = await collect(agenda.begin())
+        heard = [e.text for e in events if isinstance(e, Heard)]
+        assert not any(text.startswith("(") for text in heard), heard
+
+    async def test_a_steering_prompt_stays_out_of_the_transcript(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        said = [line for line in agenda.session.transcript]
+        assert not any(
+            turn["who"] == "prospect" and turn["text"].startswith("(") for turn in said
+        ), said
+
+    async def test_the_prospects_own_words_are_still_reported(self):
+        from rainmaker.calls.pipeline import Heard
+
+        agenda, _ = build()
+        await collect(agenda.begin())
+        events = await collect(agenda.respond("we get forty inbound calls a week"))
+        heard = [e.text for e in events if isinstance(e, Heard)]
+        assert "we get forty inbound calls a week" in heard
+
+    async def test_a_stage_direction_mentioning_a_person_does_not_hand_over(self):
+        """`_wants_human` runs on what the prospect says. Running it on a direction that
+        contains "the person you are speaking to" ends the call mid-demo."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("show me what it looks like"))
+        assert agenda.step is not Step.HANDOFF
+
+
+class TestFactsSheIsNotAllowedToRepeat:
+    """The research agent scrapes; scraping produces rubbish alongside facts. A wrong fact said
+    confidently to the person who works there is the most expensive kind of wrong here.
+    """
+
+    def test_a_price_of_one_cent_is_dropped_not_hedged(self):
+        """Observed against stripe.com: `published_price_usd = 0.01`, which is the cents half of
+        "2.9% + $0.30". Reading that back to someone at Stripe is worse than knowing nothing."""
+        facts = facts_from_enrichment({"published_price_usd": {"value": 0.01}})
+        assert facts == []
+
+    def test_a_plausible_price_survives(self):
+        facts = facts_from_enrichment({"published_price_usd": {"value": 49.0}})
+        assert facts and "49" in facts[0]
+
+    def test_an_absurd_price_is_dropped(self):
+        assert facts_from_enrichment({"published_price_usd": {"value": 9_999_999}}) == []
+
+    def test_a_paragraph_is_not_an_open_role(self):
+        """Observed: "AI is replatforming the global economy, Products and pricing Pricing Atlas
+        Authorizatio" arrived as a job title from a careers page's link text."""
+        facts = facts_from_enrichment(
+            {
+                "hiring": [
+                    {"title": "AI is replatforming the global economy, Products and pricing"},
+                    {"title": "Data Engineer"},
+                ]
+            }
+        )
+        joined = " ".join(facts)
+        assert "Data Engineer" in joined
+        assert "replatforming" not in joined
+        assert "1 open roles" in joined, "the count must reflect what survived, not what was scraped"
+
+    def test_a_real_title_with_a_slash_is_kept(self):
+        """Filtering has to be narrow. "Engineer / Platform" is a real posting."""
+        facts = facts_from_enrichment({"hiring": [{"title": "Senior Engineer / Platform"}]})
+        assert "Senior Engineer / Platform" in " ".join(facts)
