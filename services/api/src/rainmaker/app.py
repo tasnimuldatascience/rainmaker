@@ -44,6 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .agents.store import LIV_AGENT, LIV_TENANT, AgentStore, seed
 from .calls.agenda import Agenda, Panel, Phase
 from .calls.avatar import build_avatar
 from .calls.avatar import describe as describe_avatar
@@ -66,7 +67,7 @@ from .calls.providers import (
     build_voice,
     engines,
 )
-from .calls.session import CallSession, Prospect, facts_from_enrichment
+from .calls.session import CallSession, Prospect
 from .mcp.client import ToolBroker
 from .research import ResearchAgent, ResearchConfig, ResearchRequest, build_fetcher
 from .sync.hub import SyncHub
@@ -87,6 +88,7 @@ class AppState:
     tools: ToolBroker
     avatar: Any
     lipsync: LipSync
+    agents: AgentStore
 
 
 state = AppState()
@@ -124,6 +126,10 @@ async def lifespan(app: FastAPI):
     state.llm = build_language_model(os.environ.get("RAINMAKER_BRAIN", "auto"))
     state.tts = build_voice(os.environ.get("RAINMAKER_VOICE", "auto"))
     state.lipsync = LipSync()
+    state.agents = AgentStore()
+    # Tenant zero. Our own agent is a row loaded through the path a customer's agent takes, so
+    # the demo cannot drift away from the product: if configuration breaks, our front page does.
+    seed(state.agents)
     state.avatar = build_avatar(os.environ.get("RAINMAKER_AVATAR", "auto"))
     # The face reports whether it is lip-syncing, so it needs to know what is generating.
     if hasattr(state.avatar, "lipsync"):
@@ -161,6 +167,7 @@ async def lifespan(app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await warming
         await state.tools.close()
+        state.agents.close()
         await state.agent.close()
         state.oplog.close()
 
@@ -315,6 +322,7 @@ def create_app() -> FastAPI:
             "engines": engines(state.llm, state.tts),
             "avatar": {**describe_avatar(state.avatar), "lipsync": state.lipsync.describe()},
             "tools": state.tools.describe(),
+            "agents": state.agents.list_agents(),
             "disclosure": Disclosure().spoken,
             "budget_ms": TURN_BUDGET_MS,
         }
@@ -341,11 +349,37 @@ def create_app() -> FastAPI:
         """
         await ws.accept()
 
+        # WHICH AGENT IS ANSWERING. The key is the one in the script tag on a customer's own
+        # website: public by construction, and it authorises nothing — it names an agent, it
+        # does not grant the ability to edit one. An unknown key, an unpublished agent and a
+        # typo all resolve to nothing on purpose, because telling a stranger which of the three
+        # it was is an enumeration oracle.
+        spec = state.agents.resolve(ws.query_params.get("key", "")) or state.agents.live(
+            LIV_TENANT, LIV_AGENT
+        )
+        if spec is None:
+            await ws.send_json({"type": "no_agent", "detail": "no published agent for that key"})
+            await ws.close()
+            return
+
+        # The tenant's chosen voice, on the shared synthesiser. Set per call rather than per
+        # process: two tenants' agents must be able to sound different on the same box.
+        if hasattr(state.tts, "voice"):
+            state.tts.voice = spec.voice
+
         stt = ClientSpeechToText()
-        pipeline = CallPipeline(stt=stt, llm=state.llm, tts=state.tts, avatar=state.avatar)
+        pipeline = CallPipeline(
+            stt=stt,
+            llm=state.llm,
+            tts=state.tts,
+            avatar=state.avatar,
+            disclosure=Disclosure(spoken=spec.guardrails.disclosure),
+            max_sentences=spec.guardrails.max_sentences,
+        )
         session = CallSession(
             pipeline,
             stt,
+            spec=spec,
             prospect=Prospect(
                 company=ws.query_params.get("company", ""),
                 domain=ws.query_params.get("domain", ""),
@@ -427,25 +461,7 @@ def create_app() -> FastAPI:
                 message = await ws.receive_json()
                 kind = message.get("type")
 
-                if kind == "brief":
-                    # The console already has the research result on screen, so it sends that
-                    # rather than making the agent re-fetch a site it just read.
-                    #
-                    # THE CLIENT THEREFORE DECIDES WHAT THE AGENT MAY CLAIM, which is acceptable
-                    # here — one console, one operator — and would not be in a deployment where
-                    # the prospect can reach the socket. There the brief is looked up server-side
-                    # from the deal, and this message does not exist.
-                    enrichment = message.get("enrichment") or {}
-                    session.prospect = Prospect(
-                        company=message.get("company") or session.prospect.company,
-                        domain=message.get("domain") or session.prospect.domain,
-                        facts=facts_from_enrichment(enrichment) if enrichment else [],
-                    )
-                    await ws.send_json(
-                        {"type": "briefed", "facts": len(session.prospect.facts)}
-                    )
-
-                elif kind == "email":
+                if kind == "email":
                     # THE FRONT DOOR. Everything Liv knows before she speaks comes from the
                     # domain in this address, so a bad one is answered with a sentence rather
                     # than a validation code — someone is watching a form.
@@ -462,6 +478,12 @@ def create_app() -> FastAPI:
                             "text": session.pipeline.disclosure.spoken,
                             "engines": engines(state.llm, state.tts),
                             "avatar": describe_avatar(state.avatar),
+                            "agent": {
+                                "name": spec.name,
+                                "company": spec.company,
+                                "portrait": spec.portrait,
+                                "version": spec.version,
+                            },
                             "contact": {
                                 "email": contact.email,
                                 "domain": contact.domain,
@@ -482,6 +504,12 @@ def create_app() -> FastAPI:
                             "text": session.pipeline.disclosure.spoken,
                             "engines": engines(state.llm, state.tts),
                             "avatar": describe_avatar(state.avatar),
+                            "agent": {
+                                "name": spec.name,
+                                "company": spec.company,
+                                "portrait": spec.portrait,
+                                "version": spec.version,
+                            },
                         }
                     )
                     turn = asyncio.create_task(send_events(session.open()))

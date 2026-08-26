@@ -5,12 +5,19 @@ from this file — the persona, the rules the model cannot talk its way out of, 
 allowed to state. A sales agent that invents a price is not a charming bug; it is a quote the
 company has to honour or explain away, so the rules below are ordered with that first.
 
-WHAT IS GROUNDED AND WHAT IS NOT. The agent is given two bodies of fact: what Rainmaker is (a
-constant in this file, because the product's own claims should not be inventable) and what the
-research agent actually read on the prospect's website. Nothing else is admissible. The model is
-told explicitly that anything absent from both is something to offer to check rather than to
-answer — the failure this prevents is the agent confidently reciting a competitor's pricing page
-back at the person who works there.
+WHAT IS GROUNDED AND WHAT IS NOT. The agent is given two bodies of fact: what its own
+`AgentSpec` says it may claim, and what the research agent actually read on the prospect's
+website. Nothing else is admissible. The model is told explicitly that anything absent from both
+is something to offer to check rather than to answer.
+
+THE FIRST OF THOSE USED TO BE A CONSTANT IN THIS FILE, and moving it was the change that turned
+a demo into a product. Rainmaker sells this agent to other businesses; each of them points it at
+their own buyers with their own claims, so what an agent may say has to be a row someone edits
+rather than a string someone deploys. Liv is now simply the first row — see `agents/store.py`.
+
+Which raises the stake on grounding rather than lowering it. When our own agent invented a fact
+it embarrassed us; when a customer's agent invents their refund policy, the sentence in the
+complaint is "the vendor's AI said it".
 
 HANDOFF IS NOT LEFT TO THE MODEL. `_wants_human` runs before generation, and when it fires the
 agent says one fixed line and stops. Asking a 1.5B model to reliably abandon its objective is a
@@ -25,6 +32,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..agents.spec import AgentSpec, Guardrails
 from .naming import clean_company_name  # noqa: F401 — re-exported for callers
 from .pipeline import (
     CallPipeline,
@@ -65,36 +73,20 @@ You are on a LIVE VOICE CALL. Follow these rules absolutely:
   ("am I right that..."), never as a statement of fact about their company.
 """.strip()
 
-#: What the agent sells. A CONSTANT RATHER THAN A PROMPT INPUT, because the product's own claims
-#: are the ones most likely to be embellished and least excusable when they are. Every line here
-#: is true of this repository.
-PRODUCT_FACTS = """
-Rainmaker is a sales platform with three parts: a research agent that reads a company's public
-website, an AI account executive that runs the first call, and a pipeline console for the reps.
-
-What is unusual about it: the console is offline-first. Every edit is saved on the rep's own
-device immediately and synced afterwards, so it keeps working with no internet at all — on a
-train, in a basement, on a bad hotel connection. Two reps editing the same deal while both
-offline end up in agreement automatically, because the data is a CRDT rather than a database row.
-
-Everything runs locally and is open source. The language model, the voice and the research agent
-all run on the customer's own hardware, so recorded calls and pipeline data never leave it. There
-is no per-call cost and no third-party AI vendor in the contract.
-
-Pricing is not published. It depends on seats and on whether it runs in the customer's own
-environment, and it is quoted by a person.
-""".strip()
-
-#: The one line the agent says when someone asks for a human, verbatim, every time.
-HANDOFF_LINE = (
-    "Of course — let me bring someone in. I'll pass along everything we covered so you don't "
-    "have to repeat yourself."
-)
+#: Kept as the default for a session built without a spec — the tests, and the plain `start`
+#: call that exercises the voice path. A real call always carries one.
+HANDOFF_LINE = Guardrails().handoff_line
 
 
 @dataclass(slots=True)
 class AgentProfile:
-    """Who is on the call from the seller's side."""
+    """Who is on the call from the seller's side.
+
+    A thin view over `AgentSpec`, kept because the agenda retargets `objective` per step and a
+    frozen spec cannot be retargeted. Everything else here is copied from the spec at the start
+    of the call and never re-read, so publishing mid-call cannot change the agent underneath the
+    person on it.
+    """
 
     name: str = "Liv"
     company: str = "Rainmaker"
@@ -103,6 +95,15 @@ class AgentProfile:
         "Understand what the prospect is trying to fix, and find out whether it is worth "
         "putting a person on the next call."
     )
+
+    @classmethod
+    def of(cls, spec: AgentSpec) -> AgentProfile:
+        return cls(
+            name=spec.name,
+            company=spec.company,
+            persona=spec.persona,
+            objective=spec.objective,
+        )
 
 
 @dataclass(slots=True)
@@ -225,7 +226,9 @@ def facts_from_enrichment(enrichment: dict[str, Any], *, limit: int = 12) -> lis
     return out[:limit]
 
 
-def build_system_prompt(profile: AgentProfile, prospect: Prospect) -> str:
+def build_system_prompt(
+    profile: AgentProfile, prospect: Prospect, spec: AgentSpec | None = None
+) -> str:
     """Assemble the system message.
 
     Order is deliberate: identity, then the rules, then what may be claimed, then the goal. The
@@ -233,12 +236,24 @@ def build_system_prompt(profile: AgentProfile, prospect: Prospect) -> str:
     thorough" would otherwise produce an agent that reads a paragraph down the line, and no
     amount of configuration should be able to do that.
     """
+    claims = spec.knowledge_text() if spec else ""
     parts = [
         f"You are {profile.name}, {profile.persona}, at {profile.company}. "
         f"You are an AI, and you have already said so at the start of this call.",
         CALL_RULES,
-        "About " + profile.company + ", the only claims you may make about it:\n\n" + PRODUCT_FACTS,
     ]
+    if claims:
+        parts.append(
+            f"About {profile.company}, the ONLY claims you may make about it. If something is "
+            f"not below, say you will find out:\n\n{claims}"
+        )
+    else:
+        # An agent with no knowledge is not a broken agent, it is a new one. It may still
+        # discover, book and hand over; it simply may not describe a product.
+        parts.append(
+            f"You have no product information for {profile.company} on this call. Do not "
+            "describe the product. Ask questions, and offer to have a colleague follow up."
+        )
     prospect_facts = prospect.render()
     if prospect_facts:
         parts.append(
@@ -264,10 +279,15 @@ class CallSession:
         *,
         profile: AgentProfile | None = None,
         prospect: Prospect | None = None,
+        spec: AgentSpec | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.stt = stt
-        self.profile = profile or AgentProfile()
+        #: THE SPEC IS HELD, NOT RE-READ. A publish while this call is running must not change
+        #: the agent underneath the person on it — an agent whose prices move between two of its
+        #: own sentences is worse than one with stale prices.
+        self.spec = spec
+        self.profile = profile or (AgentProfile.of(spec) if spec else AgentProfile())
         self.prospect = prospect or Prospect()
         self.history: list[dict[str, str]] = []
         self.transcript: list[dict[str, Any]] = []
@@ -276,7 +296,12 @@ class CallSession:
     # ── prompt ──────────────────────────────────────────────────────────
     @property
     def system_prompt(self) -> str:
-        return build_system_prompt(self.profile, self.prospect)
+        return build_system_prompt(self.profile, self.prospect, self.spec)
+
+    @property
+    def handoff_line(self) -> str:
+        """What she says when someone asks for a person. The tenant's wording, our rule."""
+        return self.spec.guardrails.handoff_line if self.spec else HANDOFF_LINE
 
     def context(self) -> dict[str, Any]:
         return {
@@ -371,15 +396,16 @@ class CallSession:
         from .pipeline import LatencyBudget, Stage, TurnResult
 
         budget = LatencyBudget()
+        line = self.handoff_line
         self.handed_off = True
         self.record("prospect", text)
-        self.record("agent", HANDOFF_LINE)
+        self.record("agent", line)
         self.history.append({"role": "user", "content": text})
-        self.history.append({"role": "assistant", "content": HANDOFF_LINE})
+        self.history.append({"role": "assistant", "content": line})
         log.info("handoff requested: %r", text)
 
         first = True
-        async for clip in _say(self.pipeline.tts, HANDOFF_LINE):
+        async for clip in _say(self.pipeline.tts, line):
             if first:
                 first = False
                 # The fixed line is still synthesised, so it still has a first-audio latency.
@@ -390,7 +416,7 @@ class CallSession:
         yield Finished(
             TurnResult(
                 transcript=text,
-                response=HANDOFF_LINE,
+                response=line,
                 budget=budget,
                 handoff_requested=True,
             )

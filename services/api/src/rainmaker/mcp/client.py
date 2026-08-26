@@ -104,18 +104,16 @@ def default_servers() -> list[ServerSpec]:
     a working CRM. `mcp.toml` overrides this entirely when present.
     """
     python = sys.executable
-    smtp_configured = bool(os.environ.get("RAINMAKER_SMTP_HOST"))
     return [
         ServerSpec("calendar", python, ["-m", "rainmaker.mcp.servers.calendar"]),
         ServerSpec("crm", python, ["-m", "rainmaker.mcp.servers.crm"]),
         ServerSpec("research", python, ["-m", "rainmaker.mcp.servers.research"]),
-        ServerSpec(
-            "email",
-            python,
-            ["-m", "rainmaker.mcp.servers.email"],
-            enabled=smtp_configured,
-            disabled_reason="set RAINMAKER_SMTP_HOST to let her send the recap",
-        ),
+        # ALWAYS ON, WHICH IT WAS NOT. The whole server used to be disabled unless SMTP was
+        # configured, which contradicted its own design: `draft_recap` needs no mail server and
+        # `send_recap` refuses without one. The effect was that composing the follow-up — the
+        # part that is actually interesting, and the part a demo can show — had never once run.
+        # Only sending needs an account, and only sending is gated.
+        ServerSpec("email", python, ["-m", "rainmaker.mcp.servers.email"]),
     ]
 
 

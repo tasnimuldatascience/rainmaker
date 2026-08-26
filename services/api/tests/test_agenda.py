@@ -196,11 +196,21 @@ _DEFAULTS: dict[str, Any] = {
 }
 
 
-def build(email: str = "dana.whitfield@corvus.example", **overrides: Any):
+def build(email: str = "dana.whitfield@corvus.example", spec: Any = None, **overrides: Any):
+    """A call, carrying an agent spec the way a real one does.
+
+    Defaults to tenant zero. A session without a spec is a legitimate state — the plain `start`
+    call uses one — but it is not what a configured agent looks like, and the tests about what
+    she may say and charge need the configured shape.
+    """
+    from rainmaker.agents.store import liv_spec
+
+    spec = liv_spec() if spec is None else spec
     stt = ClientSpeechToText()
     session = CallSession(
         CallPipeline(stt=stt, llm=ScriptedLanguageModel(ms_per_word=0), tts=SilentTextToSpeech()),
         stt,
+        spec=spec,
     )
     tools = FakeTools(**overrides)
     return Agenda(session, tools, parse_contact(email)), tools

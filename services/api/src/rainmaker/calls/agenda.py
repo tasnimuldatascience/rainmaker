@@ -41,6 +41,35 @@ from .session import _say as speak_line
 log = logging.getLogger("rainmaker.calls.agenda")
 
 
+class _Granted:
+    """The tool layer, narrowed to what THIS agent was granted.
+
+    AN ALLOW-LIST CHECKED AT CALL TIME, not only at publish. A grant can be revoked while a call
+    is running — a tenant discovering their agent is booking meetings it should not — and the
+    answer has to be the current one rather than the one from when the socket opened.
+
+    It refuses rather than filtering silently: an agenda that asks for a tool it cannot have has
+    a bug, and swallowing that produces a call where a step quietly does nothing.
+    """
+
+    def __init__(self, tools: Tools, spec: Any):
+        self._tools = tools
+        self._spec = spec
+
+    def has(self, qualified: str) -> bool:
+        if self._spec is not None and not self._spec.may_use(qualified):
+            return False
+        return self._tools.has(qualified)
+
+    async def call(self, qualified: str, arguments: dict[str, Any] | None = None, **kw: Any):
+        if self._spec is not None and not self._spec.may_use(qualified):
+            raise PermissionError(
+                f"{self._spec.tenant}/{self._spec.agent_id} was not granted "
+                f"{qualified.split('.', 1)[0]!r}"
+            )
+        return await self._tools.call(qualified, arguments, **kw)
+
+
 class Tools(Protocol):
     """What the agenda needs from the tool layer.
 
@@ -223,7 +252,7 @@ class Agenda:
 
     def __init__(self, session: CallSession, tools: Tools, contact: Contact):
         self.session = session
-        self.tools = tools
+        self.tools = _Granted(tools, session.spec)
         self.contact = contact
         self.step: Step = Step.RESEARCHING
         self.turns_in_step = 0
@@ -460,10 +489,20 @@ class Agenda:
         The persona and the grounding rules are constant; only the goal moves. Rebuilding the
         whole prompt per step would let the rules drift between steps, which is exactly where a
         model starts inventing prices.
+
+        A tenant may override the wording of any step's objective — that is what differs between
+        selling payments infrastructure and selling dental appointments. The STEPS are not
+        theirs to change: a configurable call graph is a config language, a debugger and a
+        support burden, and the shape of a first sales call is not what varies between
+        businesses.
         """
         plan = PLAN.get(step)
-        if plan:
-            self.session.profile.objective = plan.objective
+        if not plan:
+            return
+        spec = self.session.spec
+        self.session.profile.objective = (
+            spec.objective_for(str(step), plan.objective) if spec else plan.objective
+        )
 
     async def _speak(self, prompt: str) -> AsyncIterator[AgendaEvent]:
         """Let the model say something for the current step."""
@@ -666,23 +705,36 @@ class Agenda:
             yield event
 
     async def _price(self, said: str) -> AsyncIterator[AgendaEvent]:
-        """Show the pricing, sized to what research found.
+        """Show the tiers THIS agent was configured with.
 
-        THE FIGURES ARE NOT SPOKEN AND NOT INVENTED. The panel shows the published tiers; the
-        model is told to say it depends and that a person quotes it. A number said out loud on a
-        sales call is a commitment, and this one would be a 1.5B model's guess.
+        THE FIGURES ARE NOT SPOKEN AND NOT INVENTED. The panel shows the tenant's own published
+        tiers; the model is told to say it depends and that a person quotes it. A number said
+        out loud on a sales call is a commitment, and this one would be a 1.5B model's guess —
+        which is why `Guardrails.speak_prices` is a setting a tenant is not allowed to turn on.
         """
         size = ((self.enrichment.get("size") or {}).get("value") or "").replace("_", " ")
+        spec = self.session.spec
+        tiers = (
+            [{"name": t.name, "per_seat": t.price, "for": t.detail} for t in spec.pricing]
+            if spec
+            else []
+        )
+        if not tiers:
+            # An agent whose owner has not entered prices has nothing to show, and inventing a
+            # placeholder tier would put a number on a customer's screen that nobody agreed to.
+            async for event in self._say(
+                "I don't have pricing in front of me — let me have someone send it across."
+            ):
+                yield event
+            return
+
         yield Panel(
             "pricing",
             {
                 "company": self.session.prospect.company or self.contact.company_guess,
                 "size": size,
-                "tiers": _TIERS,
-                "note": (
-                    "Sized from what her research found. Exact numbers come from a person — "
-                    "she is not allowed to quote one."
-                ),
+                "tiers": tiers,
+                "note": spec.pricing_note if spec else "",
             },
         )
         async for event in self._speak(
@@ -755,12 +807,3 @@ class Agenda:
         if outcome == "handed_off":
             return f"{company}: asked for a person mid-call."
         return f"{company}: spoke to Liv, no meeting booked."
-
-
-#: The published tiers, shown on screen and never said out loud. On screen a number is a
-#: reference; spoken on a sales call it is a quote.
-_TIERS = [
-    {"name": "Team", "per_seat": "$40 / seat / month", "for": "up to 25 reps, hosted by us"},
-    {"name": "Business", "per_seat": "$75 / seat / month", "for": "SSO, your own environment"},
-    {"name": "Enterprise", "per_seat": "quoted", "for": "self-hosted, custom retention"},
-]

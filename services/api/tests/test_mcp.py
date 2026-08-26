@@ -294,13 +294,22 @@ class TestTheProtocolPathItself:
             await broker.close()
 
     def test_the_shipped_defaults_need_no_account(self):
-        """The rule the whole server set is built around."""
+        """The rule the whole server set is built around: a clone gets working tools.
+
+        Email included. The whole email server used to be disabled without SMTP, which
+        contradicted its own design — `draft_recap` needs no mail server and `send_recap`
+        refuses without one — and meant that composing the follow-up, the interesting half, had
+        never once run. Only sending is gated now, inside the tool that sends.
+        """
         from rainmaker.mcp.client import default_servers
 
-        by_name = {spec.name: spec for spec in default_servers()}
-        assert by_name["calendar"].enabled
-        assert by_name["crm"].enabled
-        # Email is the exception, and it says why rather than looking broken.
+        for spec in default_servers():
+            assert spec.enabled, f"{spec.name} is off by default; a clone would not have it"
+
+    def test_composing_a_follow_up_needs_no_account_but_sending_does(self):
+        from rainmaker.mcp.servers import email
+
+        assert email.draft_recap(contact_name="Dana", company="Corvus", summary="x")["body"]
         if not os.environ.get("RAINMAKER_SMTP_HOST"):
-            assert not by_name["email"].enabled
-            assert by_name["email"].disabled_reason
+            with pytest.raises(ValueError, match="no mail server"):
+                email.send_recap("a@b.com", "s", "b", verified_address="a@b.com")
