@@ -226,136 +226,175 @@ export function Avatar({
     >
       <defs>
         <linearGradient id="liv-bg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--surface-3)" />
-          <stop offset="100%" stopColor="var(--surface-1)" />
+          <stop offset="0%" stopColor="#242c40" />
+          <stop offset="100%" stopColor="#131722" />
         </linearGradient>
-        <linearGradient id="liv-hair" x1="0.2" y1="0" x2="0.8" y2="1">
-          <stop offset="0%" stopColor="#4a3b52" />
-          <stop offset="55%" stopColor="#33283a" />
-          <stop offset="100%" stopColor="#241c2a" />
+        <linearGradient id="liv-hair" x1="0.15" y1="0" x2="0.9" y2="1">
+          <stop offset="0%" stopColor="#57424b" />
+          <stop offset="45%" stopColor="#3b2c33" />
+          <stop offset="100%" stopColor="#251b20" />
         </linearGradient>
-        <linearGradient id="liv-skin" x1="0.3" y1="0" x2="0.7" y2="1">
-          <stop offset="0%" stopColor="#f2c9ad" />
-          <stop offset="100%" stopColor="#e0ad8d" />
+        <linearGradient id="liv-skin" x1="0.2" y1="0" x2="0.8" y2="1">
+          <stop offset="0%" stopColor="#f3cdb0" />
+          <stop offset="100%" stopColor="#dcaa8a" />
         </linearGradient>
-        <linearGradient id="liv-top" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--accent)" />
-          <stop offset="100%" stopColor="var(--agent)" />
+        <linearGradient id="liv-jacket" x1="0.1" y1="0" x2="0.9" y2="1">
+          <stop offset="0%" stopColor="#3b4664" />
+          <stop offset="100%" stopColor="#1f2534" />
         </linearGradient>
-        <radialGradient id="liv-glow" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0%" stopColor="var(--agent)" stopOpacity="0.30" />
+        <linearGradient id="liv-shell" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#aab5cc" />
+          <stop offset="100%" stopColor="#8d99b4" />
+        </linearGradient>
+        <radialGradient id="liv-cheek" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%" stopColor="#d98474" stopOpacity="0.20" />
+          <stop offset="100%" stopColor="#d98474" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="liv-glow" cx="0.5" cy="0.42" r="0.55">
+          <stop offset="0%" stopColor="var(--agent)" stopOpacity="0.22" />
           <stop offset="100%" stopColor="var(--agent)" stopOpacity="0" />
         </radialGradient>
         <clipPath id="liv-face">
-          <ellipse cx="100" cy="92" rx="34" ry="42" />
+          {/* Must match the face path below: the fringe is drawn over the face and clipped to
+              it, so the hairline is a curve rather than a helmet edge. */}
+          <path d="M100 55 C81 55 72 70 72 91 C72 112 83 132 100 138 C117 132 128 112 128 91 C128 70 119 55 100 55 Z" />
         </clipPath>
       </defs>
 
-      <circle cx="100" cy="100" r="96" fill="url(#liv-bg)" />
+      <rect x="0" y="0" width="200" height="200" fill="url(#liv-bg)" />
       {/* Speaking glow — a cheap, legible "she has the floor" cue. */}
-      <circle
-        cx="100"
-        cy="100"
-        r="92"
+      <rect
+        x="0"
+        y="0"
+        width="200"
+        height="200"
         fill="url(#liv-glow)"
-        opacity={speaking ? 1 : 0.25}
+        opacity={speaking ? 1 : 0.3}
         style={{ transition: "opacity 260ms ease" }}
       />
 
       <g
-        transform={`translate(${sway.x} ${sway.y}) rotate(${sway.r + tilt} 100 120)`}
+        transform={`translate(${sway.x} ${sway.y}) rotate(${sway.r + tilt} 100 130)`}
         style={{ transition: "transform 90ms linear" }}
       >
-        {/* shoulders / top */}
-        <path d="M52 200 Q52 158 100 152 Q148 158 148 200 Z" fill="url(#liv-top)" opacity="0.92" />
-        <path d="M84 156 Q100 168 116 156 L116 150 Q100 156 84 150 Z" fill="url(#liv-skin)" />
-
-        {/* hair, back */}
+        {/* HAIR, BACK. A bob with volume at the crown, turning in at the jaw. It used to fall
+            straight past the shoulders on both sides, which reads as a curtain rather than as a
+            haircut, and left two pointed strands hanging in front of the collar. */}
         <path
-          d="M60 100 Q52 46 100 38 Q148 46 140 100 Q146 134 134 150 Q138 120 130 98
-             Q128 64 100 60 Q72 64 70 98 Q62 120 66 150 Q54 134 60 100 Z"
+          d="M100 34 C72 34 60 56 61 84 C62 100 60 116 63 130 C66 142 74 150 84 152
+             C74 142 72 130 72 118 C72 100 70 88 74 78 C79 62 87 56 100 56
+             C113 56 121 62 126 78 C130 88 128 100 128 118 C128 130 126 142 116 152
+             C126 150 134 142 137 130 C140 116 138 100 139 84 C140 56 128 34 100 34 Z"
           fill="url(#liv-hair)"
         />
 
-        {/* face */}
-        <ellipse cx="100" cy="92" rx="34" ry="42" fill="url(#liv-skin)" />
-        {/* cheek warmth */}
-        <ellipse cx="80" cy="102" rx="8" ry="5" fill="#e08a7a" opacity="0.18" />
-        <ellipse cx="120" cy="102" rx="8" ry="5" fill="#e08a7a" opacity="0.18" />
+        {/* NECK — SHE DID NOT HAVE ONE. A head sat straight on a collar, and that single missing
+            shape is most of why she read as a sticker rather than a person: the eye takes in the
+            head-neck-shoulder line before it takes in a face. The shadow is cast by the jaw,
+            not painted as a band across the throat, which is what the first attempt did and it
+            looked like a collar sitting on a block. */}
+        <path d="M88 112 C88 128 86 138 82 145 C90 152 110 152 118 145 C114 138 112 128 112 112 Z" fill="url(#liv-skin)" />
+        <ellipse cx="100" cy="118" rx="15" ry="9" fill="#b07a58" opacity="0.30" />
 
-        {/* fringe, drawn over the face */}
+        {/* SHOULDERS. A jacket, and its collar crosses in front of the neck base so the head
+            sits INTO the clothes rather than balancing on them. The shell is muted rather than
+            white: at tile size a bright triangle took the eye straight off her face. */}
+        <path d="M100 143 C133 144 158 157 164 200 L36 200 C42 157 67 144 100 143 Z" fill="url(#liv-jacket)" />
+        <path d="M100 154 L110 200 L90 200 Z" fill="url(#liv-shell)" />
+        <path d="M78 148 C86 143 94 141 100 141 L100 152 C94 154 90 158 88 164 L82 200 L66 200 Z" fill="url(#liv-jacket)" />
+        <path d="M122 148 C114 143 106 141 100 141 L100 152 C106 154 110 158 112 164 L118 200 L134 200 Z" fill="url(#liv-jacket)" />
+        <path d="M78 148 C86 143 94 141 100 141 L100 145 C93 148 89 154 87 162 L82 200 L76 200 L82 158 C84 152 87 150 78 148 Z" fill="#000" opacity="0.20" />
+        <path d="M122 148 C114 143 106 141 100 141 L100 145 C107 148 111 154 113 162 L118 200 L124 200 L118 158 C116 152 113 150 122 148 Z" fill="#fff" opacity="0.06" />
+
+        {/* face */}
         <path
-          d="M66 90 Q62 50 100 46 Q138 50 134 90 Q128 64 104 62 Q86 62 78 74 Q70 80 66 90 Z"
+          d="M100 55 C81 55 72 70 72 91 C72 112 83 132 100 138 C117 132 128 112 128 91 C128 70 119 55 100 55 Z"
+          fill="url(#liv-skin)"
+        />
+        <ellipse cx="82" cy="104" rx="9" ry="6" fill="url(#liv-cheek)" />
+        <ellipse cx="118" cy="104" rx="9" ry="6" fill="url(#liv-cheek)" />
+
+        {/* ears — part of why a head reads as a head rather than as an oval */}
+        <ellipse cx="71.6" cy="96" rx="3.4" ry="5.6" fill="url(#liv-skin)" />
+        <ellipse cx="128.4" cy="96" rx="3.4" ry="5.6" fill="url(#liv-skin)" />
+
+        {/* fringe: a side sweep, clipped to the face */}
+        <path
+          d="M69 94 C67 62 82 50 100 50 C120 50 132 61 131 92
+             C127 73 117 65 102 66 C90 67 80 74 74 86 C71 90 70 92 69 94 Z"
           fill="url(#liv-hair)"
           clipPath="url(#liv-face)"
         />
-        <path d="M66 90 Q70 58 98 54 Q80 66 73 96 Z" fill="#5a4864" opacity="0.32" />
 
         {/* brows */}
-        <g style={{ transition: "transform 90ms ease" }} transform={`translate(0 ${-brow * 1.6})`}>
-          <path d="M80 78 Q87 74 94 77" stroke="#3a2d42" strokeWidth="2.4" fill="none" strokeLinecap="round" />
-          <path d="M106 77 Q113 74 120 78" stroke="#3a2d42" strokeWidth="2.4" fill="none" strokeLinecap="round" />
+        <g style={{ transition: "transform 90ms ease" }} transform={`translate(0 ${-brow * 1.5})`}>
+          <path d="M82.5 82.4 Q88.5 78.6 94.8 81" stroke="#33262c" strokeWidth="2.1" fill="none" strokeLinecap="round" />
+          <path d="M105.2 81 Q111.5 78.6 117.5 82.4" stroke="#33262c" strokeWidth="2.1" fill="none" strokeLinecap="round" />
         </g>
 
-        {/* eyes */}
+        {/* eyes — smaller and set wider than the old rig's, which is most of "less cartoon" */}
         <g>
-          <ellipse cx="87" cy="90" rx="7.5" ry={blink ? 0.7 : 5.2} fill="#fff"
+          <ellipse cx="88.5" cy="92.5" rx="6" ry={blink ? 0.6 : 4} fill="#fdfbf9"
             style={{ transition: "ry 70ms ease" }} />
-          <ellipse cx="113" cy="90" rx="7.5" ry={blink ? 0.7 : 5.2} fill="#fff"
+          <ellipse cx="111.5" cy="92.5" rx="6" ry={blink ? 0.6 : 4} fill="#fdfbf9"
             style={{ transition: "ry 70ms ease" }} />
           {!blink && (
             <g style={{ transition: "transform 380ms ease" }}
                transform={`translate(${gaze.x} ${gaze.y})`}>
-              <circle cx="87" cy="90" r="3.4" fill="#3d2f47" />
-              <circle cx="113" cy="90" r="3.4" fill="#3d2f47" />
+              <circle cx="88.5" cy="92.5" r="2.8" fill="#4d392f" />
+              <circle cx="111.5" cy="92.5" r="2.8" fill="#4d392f" />
+              <circle cx="88.5" cy="92.5" r="1.3" fill="#251a15" />
+              <circle cx="111.5" cy="92.5" r="1.3" fill="#251a15" />
               {/* catchlights — a face without them reads as flat and dead */}
-              <circle cx="88.6" cy="88.4" r="1.15" fill="#fff" opacity="0.92" />
-              <circle cx="114.6" cy="88.4" r="1.15" fill="#fff" opacity="0.92" />
+              <circle cx="89.7" cy="91.3" r="0.95" fill="#fff" opacity="0.95" />
+              <circle cx="112.7" cy="91.3" r="0.95" fill="#fff" opacity="0.95" />
             </g>
           )}
-          {/* lash line */}
-          <path d="M79.5 86.5 Q87 82.6 94.5 86.5" stroke="#3a2d42" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-          <path d="M105.5 86.5 Q113 82.6 120.5 86.5" stroke="#3a2d42" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+          {/* upper lash line, heavier than the lower — the way an eye actually reads */}
+          <path d="M82.4 90.4 Q88.5 87.1 94.6 90.4" stroke="#33262c" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+          <path d="M105.4 90.4 Q111.5 87.1 117.6 90.4" stroke="#33262c" strokeWidth="1.6" fill="none" strokeLinecap="round" />
         </g>
 
-        {/* nose */}
-        <path d="M100 94 Q98 102 101 105" stroke="#c9906f" strokeWidth="1.7" fill="none" strokeLinecap="round" />
+        {/* nose — a shadow down one side and a base, rather than a hook */}
+        <path d="M98.2 99 C97.5 105 97.4 108 99 109.4" stroke="#c78e6a" strokeWidth="1.3" fill="none" strokeLinecap="round" opacity="0.7" />
+        <path d="M97.2 110.2 Q100 111.8 102.8 110.2" stroke="#c78e6a" strokeWidth="1.1" fill="none" strokeLinecap="round" opacity="0.45" />
 
-        {/* mouth — the viseme */}
+        {/* mouth — the viseme. `mw`, `mh`, `curve` and `lift` are the rig; only the palette
+            changed here. */}
         <g style={{ transition: "all 70ms ease-out" }}>
           <path
-            d={`M${100 - mw / 2} 118
-                Q100 ${118 - curve} ${100 + mw / 2} 118
-                Q100 ${118 + mh} ${100 - mw / 2} 118 Z`}
-            fill="#8f4550"
+            d={`M${100 - mw / 2} 118.5
+                Q100 ${118.5 - curve} ${100 + mw / 2} 118.5
+                Q100 ${118.5 + mh} ${100 - mw / 2} 118.5 Z`}
+            fill="#ab5f65"
           />
           {mh > 8 && (
             <path
-              d={`M${100 - mw / 2 + 4} 118 Q100 ${118 + mh * 0.55} ${100 + mw / 2 - 4} 118 Z`}
+              d={`M${100 - mw / 2 + 4} 118.5 Q100 ${118.5 + mh * 0.55} ${100 + mw / 2 - 4} 118.5 Z`}
               fill="#5e2833"
             />
           )}
           {mh > 6 && (
             <path
-              d={`M${100 - mw / 2 + 3} 118.5 Q100 ${116.5} ${100 + mw / 2 - 3} 118.5 Z`}
+              d={`M${100 - mw / 2 + 3} 119 Q100 ${117} ${100 + mw / 2 - 3} 119 Z`}
               fill="#fff"
-              opacity="0.9"
+              opacity="0.92"
             />
           )}
           {/* corner lift — the difference between a neutral mouth and a pleasant one */}
           <path
-            d={`M${100 - mw / 2} 118 q-2 ${-lift} -3.4 ${-lift * 0.7}`}
-            stroke="#a85a63" strokeWidth="1.4" fill="none" strokeLinecap="round"
+            d={`M${100 - mw / 2} 118.5 q-1.4 ${-lift} -2.6 ${-lift * 0.7}`}
+            stroke="#b56d73" strokeWidth="1.1" fill="none" strokeLinecap="round"
           />
           <path
-            d={`M${100 + mw / 2} 118 q2 ${-lift} 3.4 ${-lift * 0.7}`}
-            stroke="#a85a63" strokeWidth="1.4" fill="none" strokeLinecap="round"
+            d={`M${100 + mw / 2} 118.5 q1.4 ${-lift} 2.6 ${-lift * 0.7}`}
+            stroke="#b56d73" strokeWidth="1.1" fill="none" strokeLinecap="round"
           />
         </g>
 
-        {/* hair, front strands over the shoulder */}
-        <path d="M66 96 Q60 130 70 152 Q64 128 68 96 Z" fill="url(#liv-hair)" />
-        <path d="M134 96 Q140 130 130 152 Q136 128 132 96 Z" fill="url(#liv-hair)" />
+        {/* hair over the shoulder, which is what puts the head IN the scene rather than on it */}
+        <path d="M72 118 C71 134 74 146 84 152 C76 154 68 148 65 138 C63 130 64 122 66 116 Z" fill="url(#liv-hair)" />
+        <path d="M128 118 C129 134 126 146 116 152 C124 154 132 148 135 138 C137 130 136 122 134 116 Z" fill="url(#liv-hair)" />
       </g>
     </svg>
   );
