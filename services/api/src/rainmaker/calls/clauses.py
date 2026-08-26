@@ -51,6 +51,9 @@ MIN_CLAUSE_CHARS = 16
 _CLAUSE = re.compile(r"(?<=[,;:.!?])\s+")
 _WORD_BREAK = re.compile(r"\s+")
 
+#: A full stop, question mark or exclamation — the end of a thought rather than a pause in one.
+_SENTENCE = re.compile(r"(?<=[.!?])[\"”’)]?\s+")
+
 
 def first_cut(text: str, target: int = FIRST_CHUNK_CHARS) -> int:
     """Index at which the opening chunk ends, or 0 if it should not be split.
@@ -67,9 +70,21 @@ def first_cut(text: str, target: int = FIRST_CHUNK_CHARS) -> int:
 
 
 def split_clauses(
-    text: str, *, first_chars: int = FIRST_CHUNK_CHARS, chunk_chars: int = CHUNK_CHARS
+    text: str,
+    *,
+    first_chars: int = FIRST_CHUNK_CHARS,
+    chunk_chars: int = CHUNK_CHARS,
+    opened: bool = False,
 ) -> list[str]:
-    """Break a reply into synthesis units, smallest first."""
+    """Break a reply into synthesis units, smallest first.
+
+    `opened` says the impatient opening chunk has already been spoken. IT MATTERS BECAUSE THIS
+    IS ALSO THE TAIL PATH: a fixed line — the disclosure, the handoff — arrives as one token, so
+    the streaming loop takes its opening chunk and hands the whole remainder here, which then cut
+    a SECOND twelve-character opening out of it. The audible result was "Quick thing first",
+    "— I'm an AI,", and then the rest: a clipped fragment in the middle of a sentence, for
+    latency that had already been paid. Every disclosure on every call sounded like that.
+    """
     text = " ".join(text.split())
     if not text:
         return []
@@ -78,7 +93,7 @@ def split_clauses(
 
     # Only worth splitting the opening when enough remains to be worth streaming; a short reply
     # is produced fast enough whole.
-    if len(text) > first_chars + MIN_CLAUSE_CHARS:
+    if not opened and len(text) > first_chars + MIN_CLAUSE_CHARS:
         cut = first_cut(text, first_chars)
         if cut:
             out.append(text[:cut].strip())
@@ -128,14 +143,25 @@ def take_speakable(buffer: str, *, opened: bool) -> tuple[str, str]:
         cut = first_cut(text)
         return (text[:cut].strip(), text[cut:]) if cut else ("", buffer)
 
-    # Past the opening: emit only on a clause boundary, or when the buffer has grown past a
-    # comfortable chunk and waiting longer would stall playback.
+    # Past the opening: emit on a boundary, preferring the end of a SENTENCE.
+    #
+    # WHY THE PREFERENCE EXISTS. A synthesiser given "and I can bring in a person," produces a
+    # falling, sentence-final contour, because as far as it can tell that is the whole utterance.
+    # Cut a reply at every comma and every fragment lands with the same finality, which is most
+    # of what "sounds robotic" actually is — not the timbre, the intonation. Cutting at full
+    # stops gives each chunk a complete thought to shape, and the comma boundary is kept only
+    # for when a sentence has run long enough that waiting would stall playback.
     boundary = None
-    for match in _CLAUSE.finditer(text):
+    for match in _SENTENCE.finditer(text):
         if match.start() >= MIN_CLAUSE_CHARS:
             boundary = match.end()
             if boundary >= CHUNK_CHARS:
                 break
+
+    for match in _CLAUSE.finditer(text) if boundary is None else ():
+        if match.start() >= MIN_CLAUSE_CHARS and match.end() >= CHUNK_CHARS:
+            boundary = match.end()
+            break
     if boundary is None:
         if len(text) < CHUNK_CHARS * 2:
             return "", buffer

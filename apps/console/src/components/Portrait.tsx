@@ -114,7 +114,17 @@ function feather(context: CanvasRenderingContext2D, width: number, height: numbe
  * Drawing less of it means less of that softness is visible, and the seam has less distance to
  * travel before it is hidden by the mask above.
  */
-const PATCH_KEEP = { top: 0.42, bottom: 1 } as const;
+const PATCH_KEEP = { top: 0.28, bottom: 1 } as const;
+
+/*
+ * THE DRAWN REGION HAS TO OUTREACH THE MASK, or its top edge becomes a visible line.
+ *
+ * The mask is an ellipse centred at 0.72 of the patch with a radius of 0.34, so it still carries
+ * roughly a third of its opacity at 0.38 — and the patch was only drawn from 0.42 downwards. The
+ * result was a faint horizontal seam across her cheeks: not the mask failing, the mask working
+ * correctly on pixels that stopped existing a few rows too early. Starting at 0.28 puts the edge
+ * of the image comfortably outside anything the gradient still shows.
+ */
 
 export interface PortraitProps {
   /** Reads the current output loudness, 0..1. Polled, never pushed. */

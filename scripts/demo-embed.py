@@ -60,7 +60,7 @@ def tessera() -> AgentSpec:
     return AgentSpec(
         tenant=TENANT,
         agent_id=AGENT,
-        name="Alex",
+        name="Mara",
         company="Tessera Compute",
         persona="a straight-talking solutions engineer who would rather be exact than keen",
         objective=(
@@ -68,8 +68,16 @@ def tessera() -> AgentSpec:
             "what it costs, and either get them started on a card or get them a time with an "
             "engineer."
         ),
-        voice="male-warm",
-        portrait="/agent/alex.jpg",
+        # A DIFFERENT VOICE FROM OURS, DELIBERATELY. Two tenants that sound the same are two
+        # tenants a listener cannot tell apart, and the voice is the first thing a buyer on a
+        # call notices. Ours is US English; hers is British.
+        #
+        # Her own face, not a borrowed one. Two agents wearing one photograph is a demo of a
+        # template rather than of multi-tenancy, and the face is the first thing a buyer
+        # notices. `scripts/fetch-face.py` picked it out of the same Apache-2.0 set of
+        # synthetic portraits Liv came from.
+        voice="female-clear",
+        portrait="/agent/mara.jpg",
         knowledge=(
             Fact(
                 "Tessera rents H100 and A100 GPUs by the hour, in clusters of up to 64, with "

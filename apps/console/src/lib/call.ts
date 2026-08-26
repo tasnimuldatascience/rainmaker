@@ -481,7 +481,13 @@ export class LiveCall {
         break;
 
       case "phase":
-        this.set({ step: message.step as Step });
+        // A NEW STEP IS A NEW THING BEING SAID. The caption accumulates clause by clause and was
+        // only cleared per turn, so a turn that moves through research, greeting and narration
+        // ran all three together into one paragraph — ending, on screen, with two greetings and
+        // a sentence from a minute earlier. The transcript keeps every word; the caption shows
+        // the current one.
+        this.captionParts = [];
+        this.set({ step: message.step as Step, caption: "" });
         break;
 
       case "panel": {

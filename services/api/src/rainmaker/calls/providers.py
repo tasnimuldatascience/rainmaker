@@ -364,9 +364,11 @@ class KokoroTextToSpeech(TextToSpeech):
         "male-us": ("am_michael", "en-us"),
     }
 
-    #: Slightly above natural. Synthesised speech reads as slower than it measures — there are
-    #: none of the disfluencies a listener uses to track pace.
-    DEFAULT_SPEED = 1.05
+    #: Natural pace. This was 1.05 on the theory that synthesised speech reads as slower than it
+    #: measures — true of a monotone reader, and the wrong correction here: sped up, Kokoro
+    #: clips its own phrase endings, and a voice that never quite finishes a word is one of the
+    #: things people mean when they say a voice sounds synthetic.
+    DEFAULT_SPEED = float(os.environ.get("RAINMAKER_VOICE_SPEED", "1.0"))
 
     def __init__(
         self,
@@ -468,7 +470,7 @@ class KokoroTextToSpeech(TextToSpeech):
             if ready:
                 yield await self._one(ready, index)
                 index += 1
-        for tail in split_clauses(buffer):
+        for tail in split_clauses(buffer, opened=index > 0):
             yield await self._one(tail, index)
             index += 1
 
@@ -508,7 +510,7 @@ class SilentTextToSpeech(TextToSpeech):
             if ready:
                 yield self._estimate(ready, index)
                 index += 1
-        for tail in split_clauses(buffer):
+        for tail in split_clauses(buffer, opened=index > 0):
             yield self._estimate(tail, index)
             index += 1
 

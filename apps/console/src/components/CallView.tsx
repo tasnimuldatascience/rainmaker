@@ -1,15 +1,19 @@
 /**
  * The live call.
  *
- * THE SHAPE OF THIS SCREEN IS THE PRODUCT. It is not a chat window with a face attached — it is
- * a demo that begins with an email address, opens the prospect's own website while they watch,
- * talks over it, offers real times from a real calendar, and shows a price at the end. The
- * layout follows that: the stage is whatever Liv is currently showing, and Liv herself is a
- * small floating window over it, the way a person presenting a screen appears.
+ * IT IS SHAPED LIKE A VIDEO CALL, BECAUSE THAT IS WHAT IT IS. The other party happens to be an
+ * agent. So: a lobby with their tile and their disclosure, then a stage that fills the window,
+ * the shared screen in the middle, a presenter tile in the corner, captions across the bottom,
+ * and a control bar with a mic and a red End. The telemetry a reviewer wants — engines, latency,
+ * transcript — is one button away rather than permanently beside it, because on a call the thing
+ * worth looking at is the call.
  *
- * WHY THE EMAIL COMES FIRST. Everything she knows before she speaks comes from the domain in it.
- * A "Start call" button would open a conversation with someone she knows nothing about, which is
- * the generic AI-chat demo this is deliberately not.
+ * (It used to be a card on a page with three telemetry panels alongside: a debugging surface
+ * with a face in the corner. Everything on screen was true and none of it looked like a call.)
+ *
+ * WHY THE FORM COMES FIRST. Everything the agent knows before it speaks comes from the domain in
+ * that email address. A "Start call" button would open a conversation with someone it knows
+ * nothing about, which is the generic AI-chat demo this is deliberately not.
  *
  * WHAT CHANGED HERE, because the file's history is the point: it used to play a hardcoded script
  * of four exchanges on `setTimeout` and animate the mouth at 52ms per character. Everything on
@@ -222,7 +226,7 @@ export function CallView({ store }: { store: LocalStore }) {
               <AgentFace kind={face} call={call} state={state} />
               <span className="pip-name">
                 <span className="live-dot" />
-                {state.agent ? `${state.agent.name} · ${state.agent.company}` : "Liv"}
+                {state.agent ? `${state.agent.name} · ${state.agent.company}` : "…"}
               </span>
             </div>
           )}
@@ -233,7 +237,7 @@ export function CallView({ store }: { store: LocalStore }) {
             <AgentFace kind={face} call={call} state={state} />
             <span className="pip-name">
               <span className="live-dot" />
-              {state.agent?.name ?? "Liv"}
+              {state.agent?.name ?? "…"}
             </span>
           </div>
         )}
@@ -446,7 +450,7 @@ function Instruments({
         {state.turns.map((turn, i) => (
           <div className="turn" key={i}>
             <span className="turn-who" data-who={turn.who}>
-              {turn.who === "agent" ? (state.agent?.name ?? "Liv") : "You"}
+              {turn.who === "agent" ? (state.agent?.name ?? "Agent") : "You"}
             </span>
             <div>
               <p style={{ fontSize: "var(--t-sm)", lineHeight: 1.6 }}>{turn.text}</p>
@@ -466,7 +470,10 @@ function Instruments({
             style={{ marginBlockStart: "var(--s-4)" }}
             onClick={() => {
               const text = state.turns
-                .map((t) => `${t.who === "agent" ? "Liv" : "Prospect"}: ${t.text}`)
+                .map(
+                  (t) =>
+                    `${t.who === "agent" ? (state.agent?.name ?? "Agent") : "Prospect"}: ${t.text}`,
+                )
                 .join("\n\n");
               store.editText("deal", "d-corvus", "notes", text);
             }}
@@ -517,13 +524,16 @@ function Intake({
         <i />
         Live demo
       </span>
+      {/* WHOSE AGENT THIS IS, FROM THE AGENT. This said "Meet Liv" whichever agent was
+          answering, so the console's own heading contradicted the name on the tile beside it the
+          moment a second tenant existed. */}
       <h2>
-        Meet <span>Liv</span>.
+        Meet <span>{door?.name ?? "the agent"}</span>.
       </h2>
       <p>
-        The AI account executive that answers every buyer the moment they land, at any hour, with
-        nobody to wait for. Tell her who you are and she&apos;ll read your business before she
-        says a word. This call is the demo.
+        The AI account executive at {door?.company ?? "your company"} — answering every buyer the
+        moment they land, at any hour, with nobody to wait for. Tell it who you are and it will
+        read your business before it says a word. This call is the demo.
       </p>
 
       <div className="intake">
@@ -783,7 +793,6 @@ function SharedScreen({ page }: { page: NonNullable<Panels["browser"]> }) {
     return () => window.clearTimeout(start);
   }, [frame, page.full_page, target]);
 
-  const shown = Math.round((page.viewport_ratio ?? 1) * 100);
 
   return (
     <div className="screen" ref={viewport}>
@@ -804,8 +813,12 @@ function SharedScreen({ page }: { page: NonNullable<Panels["browser"]> }) {
             style={
               page.full_page
                 ? {
-                    // The image is the whole page; `shown`% of it is one screenful.
-                    blockSize: `${(100 / Math.max(shown, 1)) * 100}%`,
+                    // ONLY THE TRANSFORM. Forcing a height computed from the viewport ratio and
+                    // then filling it stretched the page vertically — a screen share of a
+                    // squashed website, which is what "distorted" meant. The image keeps its own
+                    // aspect ratio at the container's width, and the window crops it. A
+                    // percentage in `translateY` is a percentage of the ELEMENT, so this is
+                    // exactly "scroll to that fraction of the page".
                     transform: `translateY(${-offset * 100}%)`,
                   }
                 : undefined

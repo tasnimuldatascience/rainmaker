@@ -63,15 +63,29 @@ async function startCall(p) {
   await p.click('button:has-text("Start the call")');
 }
 
-/** Wait until she has said three things: the disclosure, the holding line, and the greeting. */
-const greeted = (p) =>
-  p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
+/**
+ * Wait until she has said three things: the disclosure, the holding line, and the greeting.
+ *
+ * The transcript lives in the details drawer now, so the turns are only in the DOM when it is
+ * open. Waiting on the caption instead would race the clause stream; waiting on the drawer's
+ * turns is the same signal it always was, one click further in.
+ */
+const greeted = async (p) => {
+  await openDetails(p);
+  await p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
     timeout: 120000,
   });
+};
+
+/** The telemetry drawer, opened once. It is closed by default on a call. */
+async function openDetails(p) {
+  const open = await p.$('.meet-round[data-on="true"]:has-text("Details")');
+  if (!open) await p.click('.meet-round:has-text("Details")');
+}
 
 const say = async (p, text) => {
-  await p.fill(".composer input", text);
-  await p.click('button:has-text("Send")');
+  await p.fill(".meet-input input", text);
+  await p.click(".meet-send");
 };
 
 await shot("pipeline-dark", async () => setTheme("dark"));
@@ -109,7 +123,7 @@ await shot("call", async (p) => {
   await p
     .waitForFunction(
       () => {
-        const el = document.querySelector(".pip .portrait");
+        const el = document.querySelector(".meet .portrait");
         if (el?.getAttribute("data-speaking") !== "true") return false;
         return Number(getComputedStyle(el).getPropertyValue("--loud")) > 0.2;
       },
@@ -124,7 +138,8 @@ await shot("call", async (p) => {
 await shot("research-live", async (p) => {
   await setTheme("dark");
   await startCall(p);
-  await p.waitForSelector(".fact-list li", { timeout: 120000 });
+  // The research result is a dossier now, not a bulleted list. `.fact-list` was the old markup.
+  await p.waitForSelector(".dossier-rows dd", { timeout: 120000 });
 }, 400);
 
 await shot("booking", async (p) => {
@@ -165,6 +180,10 @@ await shot("checkout", async (p) => {
   await page.goto(BASE, { waitUntil: "networkidle" });
   await setTheme("dark");
   await page.click('.nav button:has-text("Live call")');
+  // The mouth strip is evidence about Wav2Lip, so it has to be the photoreal face — the console
+  // opens on the illustrated one, which is a different claim entirely.
+  await page.waitForSelector(".face-switch", { timeout: 20000 });
+  await page.click('.face-switch button:has-text("Photoreal")');
   await page.fill('.intake input[autocomplete="name"]', "Dana Whitfield");
   await page.fill('.intake input[type="email"]', "dana.whitfield@stripe.com");
   await page.fill('.intake input[autocomplete="organization"]', "Stripe");
@@ -187,7 +206,7 @@ await shot("checkout", async (p) => {
   } else {
     const shots = [];
     for (let i = 0; i < 5; i += 1) {
-      const pip = await page.$(".pip");
+      const pip = await page.$(".meet-self, .meet-hero");
       shots.push(await pip.screenshot());
       await page.waitForTimeout(120);
     }

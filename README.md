@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-489%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-491%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -228,19 +228,26 @@ and the page limit counts *attempts* rather than successes.
 
 ## The call
 
-<img src="docs/img/call.png" alt="Liv mid-call, screen-sharing the prospect's own pricing page" width="100%">
+<img src="docs/img/call.png" alt="An agent mid-call, sharing its own pricing page" width="100%">
 
-That is one screenshot of one real call. `dana.whitfield@stripe.com` went into the form;
+That is one screenshot of one real call. A name, a work email and a company went into the form;
 everything after it happened by itself.
+
+**It is shaped like a video call, because that is what it is** — the other party happens to be an
+agent. A lobby with their tile and their disclosure, a stage that fills the window, the shared
+screen in the middle, a presenter tile in the corner, captions across the bottom, and a control
+bar. The engines, the latency budget and the transcript are one button away rather than
+permanently alongside: on a call the thing worth looking at is the call.
 
 **1 — She reads their business before she says a word.** Not a lookup: a browser opens the pages
 behind their email domain and pulls out facts, each with the page it came from.
 
 <img src="docs/img/research-live.png" alt="Nine facts read live from stripe.com" width="100%">
 
-**2 — Then she drives the product.** A real browser opens *our* pages — not theirs — scrolled to
-the thing she is about to talk about, and she narrates what is on the screen against the problem
-they just described.
+**2 — Then she drives the product.** A real browser opens *our* pages — not theirs — and **scrolls
+to the thing she is about to talk about while you watch**, because a screen share is a page
+moving under a window and a still of the right part of the page is a screenshot. She narrates
+what is on screen against the problem they just described.
 
 Those two steps use the same browser tool in opposite directions, and confusing them is a real
 mistake with a real cost: for a while the demo consisted of narrating the prospect's own homepage
@@ -368,11 +375,20 @@ voice ~720ms. The console shows the breakdown per turn, and on this hardware it 
 slightly over budget. Synthesis is why, and [ARCHITECTURE.md](ARCHITECTURE.md) says why the GPU
 fix was not taken.
 
-### Her face
+### Her face, and why there are two of them
 
-She is a **photoreal portrait of nobody** — a StyleGAN face from a public-domain set, not a real
-person's likeness — and **her mouth is generated from the audio she is saying**. Wav2Lip runs on
-the local GPU against the same Kokoro clip the browser is about to play.
+Every agent's portrait is a **photoreal picture of nobody** — a StyleGAN face from an Apache-2.0
+set, not a real person's likeness — and **its mouth is generated from the audio being spoken**.
+Wav2Lip runs on the local GPU against the same Kokoro clip the browser is about to play.
+
+That is the stronger claim and the weaker picture. A photograph cannot blink, cannot look
+anywhere and cannot move its head, so a still face with a moving mouth lands at the bottom of the
+uncanny valley — and every person shown it said so in the same words. **The console therefore
+opens on an illustrated face instead**, a vector viseme rig that blinks irregularly, drifts and
+re-fixes its eyes, lifts its brows on stressed syllables and tilts its head while listening. Its
+shapes come from spelling, which is a poor guide to pronunciation, but its mouth *opens* on the
+measured amplitude of the audio actually playing — so the half a viewer notices is real. One
+button switches between them and the choice is remembered.
 
 <img src="docs/img/mouth.png" alt="Consecutive frames of Liv mid-sentence" width="100%">
 
@@ -496,10 +512,10 @@ worse than the call it prevented.
 
 ```bash
 npm test                       # 53 tests — syncing, text editing, the call surface
-pytest                         # 436 tests — research, syncing, the API, the live call, the tools
+pytest                         # 438 tests — research, syncing, the API, the live call, the tools
 ```
 
-489 tests in total. None of them load a language model: a test that spends six seconds on
+491 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |

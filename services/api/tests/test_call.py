@@ -593,3 +593,37 @@ def _drain_until(ws, kind: str, limit: int = 80) -> dict:
         if message["type"] == kind:
             return message
     raise AssertionError(f"never saw a {kind!r} message")
+
+
+class TestTheTailIsNotCutTwice:
+    """A fixed line — the disclosure, the handoff — arrives as one token, so the streaming loop
+    takes its impatient opening chunk and hands the whole remainder to the tail splitter, which
+    cut a SECOND twelve-character opening out of it. Every call opened with "Quick thing first",
+    then "— I'm an AI,", then the rest: a clipped fragment mid-sentence, buying latency that had
+    already been paid for. Heard before it was read.
+    """
+
+    def test_the_remainder_keeps_its_sentences(self):
+        from rainmaker.calls.clauses import split_clauses
+
+        line = (
+            "Quick thing first — I'm an AI, not a person. I can size a cluster, quote it and "
+            "get you started, and I'll bring in an engineer whenever you want one."
+        )
+        opening = split_clauses(line)[0]
+        rest = line[len(opening) :].strip()
+
+        chunks = split_clauses(rest, opened=True)
+        assert chunks, "the tail vanished"
+        # Nothing tiny, and nothing that stops on a comma a few words in.
+        assert not any(len(chunk) < 16 for chunk in chunks), chunks
+        assert chunks[0].startswith("— I'm an AI, not a person."), chunks[0]
+
+    def test_the_opening_is_still_cut_short_when_it_has_not_been(self):
+        """The latency trick is the point of the file; this must not have disabled it."""
+        from rainmaker.calls.clauses import FIRST_CHUNK_CHARS, split_clauses
+
+        chunks = split_clauses(
+            "Of course, I can walk you through what that would cost for a team your size."
+        )
+        assert len(chunks[0]) <= FIRST_CHUNK_CHARS + 12, chunks[0]

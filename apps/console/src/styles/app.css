@@ -616,7 +616,9 @@
     object-fit: cover; object-position: top center;
   }
   .screen-frame[data-scrolling] {
-    block-size: auto; object-fit: fill; will-change: transform;
+    /* `auto` and no `object-fit`: the image is a picture of a whole page and must keep the
+       proportions it was taken at. `fill` against a computed height is what squashed it. */
+    block-size: auto; object-fit: unset; will-change: transform;
     /* Long and eased: a page scrolling is a physical motion, and 2.4s at this curve is what a
        person's thumb does. Snapping to the destination reads as a cut. */
     transition: transform 2.4s cubic-bezier(0.33, 0, 0.15, 1);
@@ -967,7 +969,16 @@
   }
   /* Inside the floating window the portrait IS the window: a square image centred in a 4:3
      frame leaves two grey wedges that read as a broken layout. */
-  .pip .portrait { inline-size: 100%; block-size: 100%; border-radius: 0; }
+  /* EVERY TILE THAT HOLDS A FACE, not just the old floating one. `Portrait fill` deliberately
+     sets no size of its own so the parent defines the frame — and when the call view was
+     rebuilt, the new tiles had no rule, so the image sized itself off an auto-height parent and
+     came out cropped hard enough to cut her mouth off at the bottom edge. Which, on a lip-sync
+     demo, is the whole thing missing. */
+  .pip .portrait,
+  .meet-hero .portrait,
+  .meet-self .portrait,
+  .lobby-tile .portrait { inline-size: 100%; block-size: 100%; border-radius: 0; }
+  .meet-hero svg, .meet-self svg, .lobby-tile svg { inline-size: 100%; block-size: 100%; }
 
   @media (prefers-reduced-motion: reduce) {
     .portrait-img { transform: none; }
