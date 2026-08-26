@@ -156,3 +156,39 @@ class TestTheFrameClock:
         # Every frame of the clause, including the last. Before the mel was padded this came up
         # four short on a three-second clause and her mouth froze at the end of every one.
         assert count == wanted, f"{count} frames for {wanted} expected"
+
+
+class TestTheWindowScipyUsedToProvide:
+    """`scipy.signal.get_window("hann", n, fftbins=True)`, in four lines of numpy.
+
+    Scipy came installed with Anaconda on the machine this was written on and with nothing on
+    CI, so the mel tests passed locally and failed on the runner. The window is arithmetic; the
+    dependency was not earning its place. These assert the properties that make it the right
+    window rather than comparing against an import that may not be there.
+    """
+
+    def test_it_is_periodic_not_symmetric(self):
+        """A symmetric window repeats its endpoint and leaks energy between bins. `np.hanning`
+        is the symmetric one, which is the easy wrong answer here."""
+        from rainmaker.calls.lipsync import WIN, _hann_window
+
+        window = _hann_window()
+        assert len(window) == WIN
+        assert window[0] == pytest.approx(0.0, abs=1e-6)
+        # Symmetric would put a 0 at the end too; periodic does not.
+        assert window[-1] > 0.0
+
+    def test_it_peaks_at_one_in_the_middle(self):
+        from rainmaker.calls.lipsync import _hann_window
+
+        window = _hann_window()
+        assert window.max() == pytest.approx(1.0, abs=1e-6)
+        assert int(np.argmax(window)) == pytest.approx(len(window) // 2, abs=1)
+
+    def test_it_matches_scipy_where_scipy_exists(self):
+        """A cross-check, not the guarantee — the assertions above hold with or without it."""
+        scipy_signal = pytest.importorskip("scipy.signal")
+        from rainmaker.calls.lipsync import WIN, _hann_window
+
+        expected = scipy_signal.get_window("hann", WIN, fftbins=True)
+        assert np.allclose(_hann_window(), expected, atol=1e-6)

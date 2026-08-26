@@ -15,10 +15,14 @@ WHY IT IS FAST ENOUGH TO BE IN A CONVERSATION, which MuseTalk is not on this har
   * ONLY THE MOUTH IS GENERATED. Wav2Lip works on a 96x96 crop; the rest of the portrait is the
     original pixels. What travels to the browser is a small patch, not a frame of video.
 
-NO LIBROSA. Wav2Lip's reference implementation pulls in librosa for one mel spectrogram, and the
-version that matches its constants is old enough to fight with everything else installed. The mel
-here is the same computation — preemphasis, STFT, mel filterbank, dB, normalise — written against
-numpy and scipy, and checked against the constants below rather than against an import.
+NO LIBROSA, AND NO SCIPY EITHER. Wav2Lip's reference pulls in librosa for one mel spectrogram, and
+the version matching its constants is old enough to fight everything else installed. The mel here
+is the same computation — preemphasis, STFT, mel filterbank, dB, normalise — in plain numpy.
+
+Scipy was in it briefly, for `get_window("hann")`, which is four lines of arithmetic. It was
+also installed by Anaconda on the machine this was written on and by nothing on CI, so the tests
+passed here and failed there. A dependency earning its place has to earn it against what it
+costs a fresh checkout.
 
 THE LICENCE IS NOT APACHE. Wav2Lip's weights are released for research and personal use, not for
 commercial use. That is a genuine difference from everything else in this repository and it is
@@ -222,10 +226,19 @@ def _mel_basis() -> np.ndarray:
     return basis
 
 
+@lru_cache(maxsize=1)
+def _hann_window() -> np.ndarray:
+    """A PERIODIC Hann window, which is what an STFT wants.
+
+    `np.hanning` is the symmetric one — it repeats its endpoint — and using it instead leaks a
+    little energy between bins. `scipy.signal.get_window("hann", n, fftbins=True)` is this.
+    """
+    n = np.arange(WIN, dtype=np.float32)
+    return (0.5 - 0.5 * np.cos(2.0 * np.pi * n / WIN)).astype(np.float32)
+
+
 def melspectrogram(wav: np.ndarray) -> np.ndarray:
     """Wav2Lip's mel, without librosa. Returns (80, frames), normalised to [-4, 4]."""
-    from scipy.signal import get_window
-
     if wav.size == 0:
         return np.zeros((N_MELS, 0), dtype=np.float32)
     emphasised = np.append(wav[0], wav[1:] - PREEMPHASIS * wav[:-1]).astype(np.float32)
@@ -233,7 +246,7 @@ def melspectrogram(wav: np.ndarray) -> np.ndarray:
     # Centred STFT with reflect padding, which is what librosa does by default and what the
     # frame count downstream assumes.
     padded = np.pad(emphasised, N_FFT // 2, mode="reflect")
-    window = get_window("hann", WIN, fftbins=True).astype(np.float32)
+    window = _hann_window()
     frames = 1 + (len(padded) - N_FFT) // HOP
     if frames <= 0:
         return np.zeros((N_MELS, 0), dtype=np.float32)
