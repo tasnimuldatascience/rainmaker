@@ -10,6 +10,10 @@ dependencies = [
     "pydantic>=2.7",
     "httpx>=0.27",
     "websockets>=12.0",
+    # The tool layer. Core rather than optional: booking a meeting is part of the product, and
+    # the servers in rainmaker/mcp/servers are how a clone gets a working calendar with no
+    # account. Pure Python, no build step.
+    "mcp>=2.1",
 ]
 
 [project.optional-dependencies]
