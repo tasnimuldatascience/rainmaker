@@ -138,7 +138,13 @@ _INTENTS: tuple[tuple[Step, re.Pattern[str]], ...] = (
     (
         Step.BOOKING,
         re.compile(
-            r"\b(?:talk|speak) to (?:a |an )?(?:human|person|real|someone|sales)"
+            # HOW PEOPLE ACTUALLY ASK FOR A PERSON: by their job. "Talk to an engineer" is the
+            # request a GPU cloud gets and it matched nothing, because the list held "human",
+            # "person", "someone" and "sales" — the words a software company uses about itself.
+            r"\b(?:talk|speak|chat|connect me)\b[^.?!]{0,16}?\b(?:to|with)\b\s+"
+            r"(?:an?\s+|the\s+|your\s+)?(?:human|person|someone|somebody|rep|engineer|"
+            r"specialist|expert|advisor|adviser|consultant|manager|sales(?:person|\s+team)?|"
+            r"account manager|technical)\b"
             r"|\b(?:book|schedule|set up|arrange)\b.{0,20}"
             r"\b(?:call|meeting|demo|time|chat|something|slot|session)\b"
             r"|\bwhen can (?:we|i) (?:speak|talk|meet)\b",

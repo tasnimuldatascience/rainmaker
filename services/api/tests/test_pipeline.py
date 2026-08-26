@@ -32,6 +32,7 @@ from rainmaker.calls.pipeline import (
     SpeechToText,
     Stage,
     TextToSpeech,
+    _wants_human,
 )
 
 
@@ -338,3 +339,45 @@ class TestTheModelCannotStateAPrice:
             pricing=(Tier("Team", "$40", "", unit_amount=4000, min_seats=1),),
         )
         assert "$400" in build_quote(spec, said_seats=10).spoken()
+
+
+class TestAskingForAPersonByTheirJob:
+    """NOBODY SAYS "MAY I SPEAK TO A HUMAN". They ask for an engineer, a rep, someone technical
+    — and the detector held "talk to a human" plus four variants of it, which are the words a
+    software company uses about itself rather than the words a buyer uses.
+
+    So "actually, can I talk to an engineer?" on a GPU cloud's own call went to the model as an
+    ordinary question and the agent carried on selling. Missing a request for a person is the
+    single worst thing this product can do, and it survived every test in this file until
+    somebody drove a whole call and asked the way a buyer would.
+    """
+
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "actually can I talk to an engineer?",
+            "can I speak to someone technical",
+            "talk to a human please",
+            "connect me with a rep",
+            "I want to chat with a specialist",
+            "can I speak to your sales team",
+            "could I talk to the account manager",
+        ],
+    )
+    def test_a_request_for_a_person_is_heard(self, said: str):
+        assert _wants_human(said), said
+
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "can you talk to me about pricing",
+            "how do I talk to your API",
+            "we speak to about forty customers a week",
+            "I will talk to my team about it",
+            "does it integrate with our chat tool",
+        ],
+    )
+    def test_ordinary_sentences_do_not_trigger_a_handoff(self, said: str):
+        """A false positive costs one unnecessary transfer, which is cheap — but an agent that
+        hands off whenever the word "talk" appears cannot hold a conversation at all."""
+        assert not _wants_human(said), said

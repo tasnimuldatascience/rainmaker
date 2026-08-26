@@ -626,9 +626,23 @@ class CallPipeline:
 
 
 _HUMAN_REQUEST = (
-    "talk to a human", "speak to a human", "real person", "actual person",
-    "human being", "transfer me", "get me someone", "is this a bot", "are you a robot",
-    "are you real", "are you human",
+    "real person", "actual person", "human being", "transfer me", "get me someone",
+    "is this a bot", "are you a robot", "are you real", "are you human",
+)
+
+#: WHAT PEOPLE CALL A PERSON, WHICH IS USUALLY THEIR JOB. Nobody says "may I speak to a human"
+#: — they ask for an engineer, a rep, someone technical. The phrase list held "talk to a human"
+#: and four variants of it, so "can I talk to an engineer?" went to the model as an ordinary
+#: question and the agent carried on selling. That is the single worst thing this product can
+#: do, and it survived until somebody drove a whole call and asked the way a buyer would.
+_HUMAN_ROLE = (
+    r"human|person|someone|somebody|rep|engineer|specialist|expert|advisor|adviser|"
+    r"consultant|manager|agent|sales(?:person)?|account manager|technical"
+)
+_ASK_FOR_A_PERSON = re.compile(
+    r"\b(?:talk|speak|chat|connect me)\b[^.?!]{0,16}?\b(?:to|with)\b\s+"
+    r"(?:an?\s+|the\s+|your\s+)?(?:" + _HUMAN_ROLE + r")\b",
+    re.IGNORECASE,
 )
 
 
@@ -640,4 +654,6 @@ def _wants_human(transcript: str) -> bool:
     worst thing this product can do.
     """
     low = transcript.lower()
-    return any(phrase in low for phrase in _HUMAN_REQUEST)
+    if any(phrase in low for phrase in _HUMAN_REQUEST):
+        return True
+    return bool(_ASK_FOR_A_PERSON.search(transcript))
