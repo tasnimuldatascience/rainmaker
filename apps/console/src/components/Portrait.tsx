@@ -66,30 +66,38 @@ function feather(context: CanvasRenderingContext2D, width: number, height: numbe
   const previous = context.globalCompositeOperation;
   context.globalCompositeOperation = "destination-in";
 
-  // CENTRED ON THE MOUTH, NOT ON THE PATCH. Wav2Lip only regenerates the lower half of the crop
-  // it is given; the top half comes back a re-rendered, slightly softer copy of pixels that were
-  // already correct. Fading from the middle of the rectangle therefore kept the half with
-  // nothing to add and put a soft seam across her cheek. Fading from the mouth keeps what the
-  // model actually generated and lets the untouched photograph win everywhere else.
+  // CENTRED ON THE MOUTH, AND TIGHT AROUND IT. Wav2Lip is handed a crop that runs from the
+  // eyebrows to the chin and hands back a re-rendered copy of all of it — a mouth it generated,
+  // and a nose, cheeks and jaw it merely redrew, slightly softer and a hair different every
+  // frame. Keeping that whole rectangle meant the middle of her face very slightly swam from
+  // frame to frame, and a face that swims is exactly the "cheap" tell: nobody can name it, and
+  // everybody sees it.
+  //
+  // So the mask is now an ellipse around the mouth rather than a fade across the crop. The nose
+  // ridge, the cheekbones and the eyes are the untouched photograph in every frame, and only
+  // what the model has something to say about is the model's.
   const centreX = width * 0.5;
-  const centreY = height * 0.66;
-  // Wider than tall: a mouth is an ellipse, and a circle big enough to cover it reaches the
-  // jawline. Scaling the context is the only way to get an elliptical gradient on a canvas.
-  const stretch = 1.35;
+  const centreY = height * 0.72;
+
+  // Wider than tall: a mouth is an ellipse, and a circle big enough to cover the corners of the
+  // lips reaches the jawline and the base of the nose.
+  const stretch = 1.3;
 
   context.save();
   context.translate(centreX, centreY);
   context.scale(stretch, 1);
   context.translate(-centreX, -centreY);
 
-  const radius = Math.max(width / stretch, height) * 0.5;
+  // A THIRD OF THE CROP, NOT ALL OF IT. The old radius was half the larger dimension, which
+  // reached the eyes.
+  const radius = height * 0.34;
   const gradient = context.createRadialGradient(
-    centreX, centreY, radius * 0.42,
+    centreX, centreY, radius * 0.5,
     centreX, centreY, radius,
   );
   gradient.addColorStop(0, "rgba(0,0,0,1)");
-  gradient.addColorStop(0.55, "rgba(0,0,0,0.98)");
-  gradient.addColorStop(0.8, "rgba(0,0,0,0.55)");
+  gradient.addColorStop(0.62, "rgba(0,0,0,0.97)");
+  gradient.addColorStop(0.84, "rgba(0,0,0,0.45)");
   gradient.addColorStop(1, "rgba(0,0,0,0)");
   context.fillStyle = gradient;
   // Generous, because the context is scaled and the rectangle has to still cover the canvas.
@@ -98,6 +106,15 @@ function feather(context: CanvasRenderingContext2D, width: number, height: numbe
 
   context.globalCompositeOperation = previous;
 }
+
+/**
+ * How much of the patch is worth keeping, as a fraction of its height.
+ *
+ * The generated crop is upscaled from 96x96, so it is softer than the photograph it lands on.
+ * Drawing less of it means less of that softness is visible, and the seam has less distance to
+ * travel before it is hidden by the mask above.
+ */
+const PATCH_KEEP = { top: 0.42, bottom: 1 } as const;
 
 export interface PortraitProps {
   /** Reads the current output loudness, 0..1. Polled, never pushed. */
@@ -138,6 +155,9 @@ export function Portrait({
     // A slow lissajous drift so the frame is never perfectly still. Two primes so the loop is
     // long enough that nobody sees it repeat.
     const start = performance.now();
+    // Where the micro-settle is heading, and where it has got to. See below.
+    let settleX = 0;
+    let settleY = 0;
 
     const tick = () => {
       const node = wrapper.current;
@@ -150,8 +170,25 @@ export function Portrait({
         const driftY = Math.cos(now / 11.7) * 1.1;
         const breathe = 1 + Math.sin(now / 4.1) * 0.004;
 
-        node.style.setProperty("--drift-x", `${driftX.toFixed(2)}px`);
-        node.style.setProperty("--drift-y", `${driftY.toFixed(2)}px`);
+        // A MICRO-SETTLE, WHICH IS THE PART A STILL PHOTOGRAPH CANNOT DO. A sine drift is
+        // perfectly smooth and perfectly periodic, and a face that moves that evenly reads as a
+        // picture on a slow pan. People make small, irregular adjustments and then hold — so
+        // every few seconds this picks a new sub-pixel offset and eases toward it, and the
+        // easing means it is arriving rather than sliding. It is a millimetre of movement; the
+        // point is that it is not on a metronome.
+        //
+        // Deterministic from the clock rather than random, so two frames rendered at the same
+        // instant agree and nothing jitters when the tab is throttled and resumes.
+        const bucket = Math.floor(now / 2.7);
+        const noise = (seed: number) => {
+          const value = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
+          return (value - Math.floor(value)) * 2 - 1;
+        };
+        settleX += (noise(bucket) * 1.1 - settleX) * 0.02;
+        settleY += (noise(bucket + 99) * 0.8 - settleY) * 0.02;
+
+        node.style.setProperty("--drift-x", `${(driftX + settleX).toFixed(2)}px`);
+        node.style.setProperty("--drift-y", `${(driftY + settleY).toFixed(2)}px`);
         node.style.setProperty("--scale", `${(breathe + loud * 0.012).toFixed(4)}`);
         node.style.setProperty("--loud", loud.toFixed(3));
 
@@ -182,7 +219,24 @@ export function Portrait({
               context.clearRect(0, 0, surface.width, surface.height);
               // Wav2Lip generates at 96x96; the browser is the right place to scale it up,
               // which is what the reference implementation does too.
-              context.drawImage(bitmap, 0, 0, surface.width, surface.height);
+              //
+              // ONLY THE LOWER PART OF THE PATCH IS DRAWN. The top of it is the model's redraw
+              // of pixels that were already correct and already sharper in the photograph.
+              const sourceTop = bitmap.height * PATCH_KEEP.top;
+              const sourceHeight = bitmap.height * (PATCH_KEEP.bottom - PATCH_KEEP.top);
+              const destTop = surface.height * PATCH_KEEP.top;
+              // THE PATCH IS UPSCALED FROM 96x96 AND THE PHOTOGRAPH IS NOT, so it lands slightly
+              // flatter and slightly paler than the face around it. A small contrast and
+              // saturation nudge is not sharpening — it cannot put back detail that was never
+              // generated — but it stops the mouth reading as a duller cut-out of a brighter
+              // face, which is most of what "pasted on" actually looks like.
+              context.filter = "contrast(1.06) saturate(1.05)";
+              context.drawImage(
+                bitmap,
+                0, sourceTop, bitmap.width, sourceHeight,
+                0, destTop, surface.width, surface.height - destTop,
+              );
+              context.filter = "none";
               feather(context, surface.width, surface.height);
               surface.style.opacity = "1";
             }
