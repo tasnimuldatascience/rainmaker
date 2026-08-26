@@ -321,21 +321,6 @@
   /* ── call view ─────────────────────────────────────────────────────── */
   /* The demo stage. Laid out like the page a prospect would actually land on -- headline,
      a floating agent window, and a caption bubble -- rather than like a debugging surface.
-     The agent is the product here, so the product is what gets rendered. */
-  .demo {
-    position: relative; border-radius: var(--r-lg); border: 1px solid var(--line);
-    background: radial-gradient(130% 100% at 22% -10%, var(--surface-3), var(--bg) 62%);
-    min-block-size: 34rem; overflow: hidden; padding: var(--s-5);
-    /* rail, stage, caption, composer. The stage row is `minmax(0, 1fr)` so a tall panel
-       scrolls inside itself rather than pushing the composer off the bottom. */
-    display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: var(--s-4);
-  }
-  /* The stage keeps clear of the portrait, so a panel's own content never runs underneath it. */
-  @media (min-width: 1101px) {
-    .demo > .stage-card, .demo > .screen { padding-inline-end: 17rem; }
-    .demo > .caption { padding-inline-end: 17rem; }
-  }
-  .demo[data-live="true"] { border-color: color-mix(in oklab, var(--agent) 40%, var(--line)); }
 
   .pill {
     display: inline-flex; align-items: center; gap: var(--s-2); justify-self: start;
@@ -381,19 +366,6 @@
      portrait covered the right-hand end of every row it overlapped — the third time slot, the
      edge of the quote card — which reads as a rendering bug rather than as a video window.
      The stage now reserves a column for her at wide sizes and she tucks into the corner only
-     when there is no room for one. */
-  .pip {
-    position: absolute; inset-block-end: 7.5rem; inset-inline-end: var(--s-6);
-    inline-size: 15rem; aspect-ratio: 4 / 3.4; border-radius: var(--r-lg); overflow: hidden;
-    background: linear-gradient(170deg, var(--surface-3), var(--surface-1));
-    border: 1px solid var(--line-strong); box-shadow: var(--shadow-3);
-    display: grid; place-items: center;
-    transition: box-shadow var(--med), transform var(--med), border-color var(--med);
-  }
-  .pip[data-speaking="true"] {
-    border-color: color-mix(in oklab, var(--agent) 60%, transparent);
-    box-shadow: var(--shadow-3), 0 0 0 4px color-mix(in oklab, var(--agent) 16%, transparent);
-  }
   .pip-name {
     position: absolute; inset-block-end: var(--s-2); inset-inline-start: var(--s-2);
     display: inline-flex; align-items: center; gap: 6px;
@@ -408,33 +380,7 @@
     color: var(--fg-2); font-size: 13px; letter-spacing: 1px;
   }
 
-  /* The caption bubble. Follows the AUDIO, not the token stream -- subtitles that run ahead of
-     the voice read as a bug even when both are correct. */
-  .caption {
-    /* Sized like a subtitle bar, not a tooltip. Shrink-to-fit made a three-word clause render
-       as a stray button floating mid-stage; a caption that changes shape on every clause is
-       more distracting than the words are useful. Fixed width, fixed height, text left. */
-    justify-self: start; align-self: end;
-    inline-size: min(68%, 62ch); min-block-size: 4.25rem;
-    /* Bounded, and it took a leak to notice. A stage direction escaped into the caption and the
-       bubble grew to a dozen lines, pushing the composer off the bottom of the stage. Even with
-       that fixed, a long reply must not be able to break the layout. */
-    max-block-size: 8.5rem; overflow-y: auto;
-    padding: var(--s-3) var(--s-4); border-radius: var(--r-lg);
-    background: var(--surface-1); border: 1px solid var(--line);
-    box-shadow: var(--shadow-2); font-size: var(--t-lg); line-height: 1.5;
-    display: grid; align-items: center; transition: opacity var(--fast);
-  }
-  .caption[data-empty="true"] { color: var(--fg-3); font-size: var(--t-md); }
 
-  .composer { display: flex; gap: var(--s-2); align-items: center; }
-  .composer input {
-    flex: 1; padding: 11px var(--s-4); border-radius: var(--r-full);
-    background: var(--surface-1); border: 1px solid var(--line-strong); color: var(--fg);
-    font: inherit; font-size: var(--t-md); outline: none; transition: border-color var(--fast);
-  }
-  .composer input:focus { border-color: var(--accent); }
-  .composer input::placeholder { color: var(--fg-4); }
 
   .talk {
     display: inline-flex; align-items: center; gap: var(--s-2);
@@ -458,13 +404,6 @@
     animation: pulse 1s var(--ease) infinite;
   }
 
-  /* The stage: whatever she is showing right now, with her floating over it. One panel at a
-     time -- a dashboard of six simultaneous widgets is a screen nobody reads. */
-  .call-grid {
-    display: grid; gap: var(--s-5); align-items: start;
-    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
-  }
-  @media (max-width: 1100px) { .call-grid { grid-template-columns: minmax(0, 1fr); } }
 
   /* Nine steps on one line at 1500px and two lines below it, with the aside ("Getting a person")
      always last. `row-gap` keeps the second row from touching the first when it wraps. */
@@ -661,6 +600,12 @@
      video call where the other party is an agent, so it is shaped like one: a stage that fills
      the window, the shared screen in the middle, a tile of whoever is talking, captions over
      the bottom, and a control bar. Nobody needs to be taught how to use it. */
+  /* THE PADDING LIVES ON `.page`, AND THESE TWO ARE NOT PAGES. Every other view is wrapped in
+     `.page`, which carries the gutter; the call fills the window instead, so it has to carry its
+     own — without it the form ran flush into the right edge of the screen. */
+  .meet, .lobby { margin-inline: auto; max-inline-size: 1500px; padding-inline: var(--s-5); }
+  .lobby { padding-block: var(--s-5); }
+
   .meet {
     position: relative;
     display: grid; grid-template-rows: minmax(0, 1fr) auto;
@@ -715,6 +660,8 @@
   .meet-caption {
     position: absolute; inset-inline: var(--s-6); inset-block-end: var(--s-4);
     max-inline-size: 52rem; margin-inline: auto; z-index: 4;
+    /* Clears the presenter tile when one is on screen. Centred across the full stage, the
+       caption ran underneath her and the last few words were behind her shoulder. */
     padding: var(--s-3) var(--s-5); border-radius: var(--r-md);
     background: rgb(0 0 0 / 0.72); backdrop-filter: blur(10px);
     color: #fff; font-size: var(--t-lg); line-height: 1.45; text-align: center;
@@ -725,6 +672,7 @@
     max-block-size: 4.4em; overflow: hidden;
   }
   .meet-caption[data-partial] { color: rgb(255 255 255 / 0.62); font-style: italic; }
+  .meet-stage:has(.meet-self) .meet-caption { inset-inline-end: 15rem; margin-inline: 0 auto; }
 
   .meet-toast {
     position: absolute; inset-block-start: var(--s-6); inset-inline: 0; margin-inline: auto;
@@ -974,7 +922,6 @@
      rebuilt, the new tiles had no rule, so the image sized itself off an auto-height parent and
      came out cropped hard enough to cut her mouth off at the bottom edge. Which, on a lip-sync
      demo, is the whole thing missing. */
-  .pip .portrait,
   .meet-hero .portrait,
   .meet-self .portrait,
   .lobby-tile .portrait { inline-size: 100%; block-size: 100%; border-radius: 0; }
