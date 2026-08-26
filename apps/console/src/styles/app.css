@@ -558,7 +558,7 @@
 
   /* A browser window, because the prospect has to believe she is really opening their site. */
   .screen {
-    align-self: stretch; min-block-size: 0; display: grid; grid-template-rows: auto 1fr;
+    align-self: stretch; min-block-size: 0; display: grid; grid-template-rows: auto minmax(0, 1fr);
     border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden;
     background: var(--surface-1); box-shadow: var(--shadow-2);
   }
@@ -572,8 +572,65 @@
     flex: 1; font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-3);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .screen-frame { inline-size: 100%; block-size: 100%; object-fit: cover; object-position: top center; }
-  .screen-loading { display: grid; place-items: center; color: var(--fg-3); font-size: var(--t-sm); }
+  /* ── the dossier ───────────────────────────────────────────────────── */
+  .dossier-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-4);
+    padding-block-end: var(--s-4); border-block-end: 1px solid var(--line);
+  }
+  .dossier-kicker {
+    display: block; font-size: var(--t-xs); font-weight: 650; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent); margin-block-end: 4px;
+  }
+  .dossier-head h3 { font-size: var(--t-xl); letter-spacing: -0.02em; }
+  .dossier-count {
+    display: grid; justify-items: center; gap: 2px; padding: var(--s-3) var(--s-4);
+    border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line);
+    font-size: var(--t-xs); color: var(--fg-3); text-align: center; white-space: nowrap;
+  }
+  .dossier-count b { font-size: var(--t-lg); color: var(--fg); font-variant-numeric: tabular-nums; }
+
+  .dossier-rows { display: grid; gap: 0; margin-block-start: var(--s-2); }
+  .dossier-rows > div {
+    display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: var(--s-4);
+    padding-block: var(--s-3); border-block-end: 1px solid var(--line);
+    align-items: baseline;
+  }
+  .dossier-rows > div:last-child { border-block-end: none; }
+  .dossier-rows dt {
+    font-size: var(--t-xs); font-weight: 620; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--fg-3);
+  }
+  .dossier-rows dd { font-size: var(--t-md); color: var(--fg); line-height: 1.5; }
+  .dossier-rows > div:has(dd:only-child) dd { grid-column: 1 / -1; }
+  @media (max-width: 760px) {
+    .dossier-rows > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  }
+
+  /* THE WINDOW IS A VIEWPORT, NOT A PICTURE FRAME. The image inside it is the entire page, and
+     it is translated under a fixed window — so what you watch is a page scrolling, which is what
+     a shared screen looks like. `cover` on a still of the destination is what it used to be, and
+     everybody who saw it said the browser was not doing anything. */
+  .screen-viewport { position: relative; overflow: hidden; min-block-size: 0; }
+  .screen-frame {
+    display: block; inline-size: 100%; block-size: 100%;
+    object-fit: cover; object-position: top center;
+  }
+  .screen-frame[data-scrolling] {
+    block-size: auto; object-fit: fill; will-change: transform;
+    /* Long and eased: a page scrolling is a physical motion, and 2.4s at this curve is what a
+       person's thumb does. Snapping to the destination reads as a cut. */
+    transition: transform 2.4s cubic-bezier(0.33, 0, 0.15, 1);
+  }
+  .screen-loading {
+    display: grid; place-items: center; gap: var(--s-3); color: var(--fg-3);
+    font-size: var(--t-sm); block-size: 100%;
+  }
+  .screen-spinner {
+    inline-size: 22px; block-size: 22px; border-radius: 50%;
+    border: 2px solid var(--line-strong); border-block-start-color: var(--accent);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .stage-card {
     align-self: stretch; overflow: auto; padding: var(--s-5);
@@ -595,6 +652,180 @@
     list-style: none; font-size: var(--t-sm); line-height: 1.5;
     padding-inline-start: var(--s-4); border-inline-start: 2px solid var(--accent-lo);
   }
+
+  /* ── the call, laid out like a meeting ─────────────────────────────
+     WHY IT LOOKS LIKE THIS. The old screen was a card on a page with three telemetry panels
+     beside it — a debugging surface with a face in the corner. What this actually is, is a
+     video call where the other party is an agent, so it is shaped like one: a stage that fills
+     the window, the shared screen in the middle, a tile of whoever is talking, captions over
+     the bottom, and a control bar. Nobody needs to be taught how to use it. */
+  .meet {
+    position: relative;
+    display: grid; grid-template-rows: minmax(0, 1fr) auto;
+    /* Fills what is left under the top bar, so the stage is the window rather than a box in it. */
+    block-size: calc(100vh - 8.5rem);
+    min-block-size: 34rem;
+    border-radius: var(--r-lg); overflow: hidden;
+    background: radial-gradient(120% 90% at 50% -20%, var(--surface-3), #05070b 70%);
+    border: 1px solid var(--line);
+  }
+  .meet[data-side="true"] { grid-template-columns: minmax(0, 1fr) 26rem; }
+  .meet[data-side="true"] .meet-stage { grid-column: 1; }
+  .meet[data-side="true"] .meet-bar { grid-column: 1; }
+  .meet[data-side="true"] .meet-side { grid-column: 2; grid-row: 1 / -1; }
+
+  .meet-stage {
+    position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr);
+    padding: var(--s-4); gap: var(--s-4); min-block-size: 0;
+  }
+  .meet-top { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+  .meet-chip {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px var(--s-3);
+    border-radius: var(--r-full); background: rgb(0 0 0 / 0.45); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); color: var(--fg-2); font-size: var(--t-xs); font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .meet-main { position: relative; min-block-size: 0; display: grid; }
+  .meet-main > * { min-block-size: 0; }
+
+  /* Nothing being shared: she is the call, so she fills it. */
+  .meet-hero {
+    position: relative; justify-self: center; align-self: center;
+    inline-size: min(38rem, 100%); aspect-ratio: 4 / 3;
+    border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-3);
+  }
+
+  /* Something is being shared: she shrinks into the corner, the way a presenter tile does. */
+  .meet-self {
+    position: absolute; inset-block-end: var(--s-4); inset-inline-end: var(--s-4);
+    inline-size: 13.5rem; aspect-ratio: 4 / 3.2; border-radius: var(--r-md); overflow: hidden;
+    border: 1px solid var(--line-strong); box-shadow: var(--shadow-3); z-index: 3;
+    background: var(--surface-1); transition: border-color var(--med), box-shadow var(--med);
+  }
+  .meet-self[data-speaking="true"] {
+    border-color: color-mix(in oklab, var(--agent) 65%, transparent);
+    box-shadow: var(--shadow-3), 0 0 0 3px color-mix(in oklab, var(--agent) 18%, transparent);
+  }
+
+  /* Captions sit over the stage, like a call's live captions, not in a box beside it. */
+  .meet-caption {
+    position: absolute; inset-inline: var(--s-6); inset-block-end: var(--s-4);
+    max-inline-size: 52rem; margin-inline: auto; z-index: 4;
+    padding: var(--s-3) var(--s-5); border-radius: var(--r-md);
+    background: rgb(0 0 0 / 0.72); backdrop-filter: blur(10px);
+    color: #fff; font-size: var(--t-lg); line-height: 1.45; text-align: center;
+    text-wrap: balance; pointer-events: none;
+    /* Three lines, like a real caption track. The text itself is trimmed to its tail in the
+       component, so what is clamped away is the beginning of the sentence rather than the end
+       somebody is currently hearing. */
+    max-block-size: 4.4em; overflow: hidden;
+  }
+  .meet-caption[data-partial] { color: rgb(255 255 255 / 0.62); font-style: italic; }
+
+  .meet-toast {
+    position: absolute; inset-block-start: var(--s-6); inset-inline: 0; margin-inline: auto;
+    inline-size: fit-content; max-inline-size: 40rem; z-index: 5;
+    padding: var(--s-3) var(--s-5); border-radius: var(--r-md);
+    background: color-mix(in oklab, var(--lost) 22%, #000); color: #fff; font-size: var(--t-sm);
+    border: 1px solid color-mix(in oklab, var(--lost) 45%, transparent);
+  }
+
+  /* ── the control bar ──────────────────────────────────────────────── */
+  .meet-bar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center; gap: var(--s-4);
+    padding: var(--s-4) var(--s-5);
+    background: rgb(0 0 0 / 0.4); border-block-start: 1px solid var(--line);
+    backdrop-filter: blur(10px);
+  }
+  .meet-input { display: flex; gap: var(--s-2); align-items: center; min-inline-size: 0; }
+  .meet-input input {
+    flex: 1; min-inline-size: 0; block-size: 44px; padding: 0 var(--s-4);
+    border-radius: var(--r-full); background: var(--surface-1);
+    border: 1px solid var(--line-strong); color: var(--fg); font: inherit;
+    font-size: var(--t-sm); outline: none; transition: border-color var(--fast);
+  }
+  .meet-input input:focus { border-color: var(--accent); }
+  .meet-send {
+    block-size: 44px; padding: 0 var(--s-4); border-radius: var(--r-full);
+    border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--fg);
+    font: inherit; font-size: var(--t-sm); font-weight: 600; cursor: pointer;
+  }
+  .meet-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .meet-controls { display: flex; gap: var(--s-3); justify-self: center; }
+  .meet-round {
+    display: grid; place-items: center; gap: 2px; inline-size: 5.2rem; padding: 7px 0;
+    border-radius: var(--r-md); border: 1px solid var(--line-strong);
+    background: var(--surface-2); color: var(--fg-2); cursor: pointer;
+    font: inherit; font-size: 17px; line-height: 1;
+    transition: background var(--fast), color var(--fast), border-color var(--fast);
+  }
+  .meet-round span { font-size: var(--t-xs); font-weight: 600; }
+  .meet-round:hover { background: var(--surface-3); color: var(--fg); }
+  .meet-round[data-on="true"] {
+    background: color-mix(in oklab, var(--accent) 20%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 55%, transparent); color: var(--fg);
+  }
+  .meet-round[data-live="true"] { animation: pulse 1.6s var(--ease) infinite; }
+  .meet-round[data-end] {
+    background: color-mix(in oklab, var(--lost) 78%, #000); border-color: transparent; color: #fff;
+  }
+  .meet-round[data-end]:hover { background: var(--lost); }
+  .meet-round:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .meet-flags { display: flex; gap: var(--s-2); justify-content: flex-end; flex-wrap: wrap; }
+
+  .meet-side {
+    display: grid; gap: var(--s-4); align-content: start; overflow-y: auto;
+    padding: var(--s-4); background: var(--surface-1);
+    border-inline-start: 1px solid var(--line);
+  }
+  .meet-transcript { max-block-size: 42vh; overflow-y: auto; }
+
+  @media (max-width: 1100px) {
+    .meet[data-side="true"] { grid-template-columns: minmax(0, 1fr); }
+    .meet[data-side="true"] .meet-side { grid-column: 1; grid-row: auto; max-block-size: 40vh; }
+    .meet-bar { grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
+    .meet-flags { justify-content: flex-start; }
+  }
+
+  /* ── the lobby: the screen before the call ────────────────────────── */
+  .lobby {
+    display: grid; gap: var(--s-6); align-items: center;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-block-size: calc(100vh - 10rem);
+  }
+  @media (max-width: 980px) { .lobby { grid-template-columns: minmax(0, 1fr); } }
+  .lobby-preview { display: grid; gap: var(--s-4); justify-items: center; }
+  .lobby-switch { display: inline-flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .lobby-switch button {
+    display: grid; gap: 1px; padding: var(--s-2) var(--s-4); border-radius: var(--r-full);
+    border: 1px solid var(--line-strong); background: var(--surface-1); color: var(--fg-2);
+    font: inherit; font-size: var(--t-sm); font-weight: 600; cursor: pointer;
+    transition: border-color var(--fast), color var(--fast), background var(--fast);
+  }
+  .lobby-switch button span { font-size: var(--t-xs); font-weight: 500; color: var(--fg-4); }
+  .lobby-switch button:hover { color: var(--fg); border-color: var(--fg-4); }
+  .lobby-switch button[data-on="true"] {
+    border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+    background: var(--accent-wash); color: var(--fg);
+  }
+  .lobby-tile {
+    position: relative; inline-size: min(30rem, 100%); aspect-ratio: 4 / 3;
+    border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-3); background: var(--surface-1);
+  }
+  .lobby-note {
+    max-inline-size: 34rem; text-align: center; color: var(--fg-3); font-size: var(--t-sm);
+    line-height: 1.6;
+  }
+  /* The lobby gives the hero a column, and the form has to live inside it: `.intake` is
+     `min(52rem, 100%)`, and 52rem is wider than half of a 1500px window. */
+  .lobby .hero { max-inline-size: 100%; align-self: center; }
+  .lobby .intake { inline-size: 100%; }
 
   /* ── the diary ─────────────────────────────────────────────────────── */
   .page-head .btn { margin-inline-start: auto; }

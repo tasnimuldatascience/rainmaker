@@ -723,6 +723,12 @@ class Agenda:
                 "label": stop.label,
                 "frame": looked.get("frame_jpeg_base64", ""),
                 "scrolled_to": looked.get("scrolled_to", ""),
+                # The console scrolls to this in front of the prospect rather than cutting to
+                # a still of the destination. A browser being driven looks like a browser being
+                # driven; a screenshot of the right part of a page looks like a screenshot.
+                "full_page": looked.get("full_page", False),
+                "scroll_ratio": looked.get("scroll_ratio", 0),
+                "viewport_ratio": looked.get("viewport_ratio", 1),
             },
         )
         excerpt = (looked.get("text") or "")[:700]

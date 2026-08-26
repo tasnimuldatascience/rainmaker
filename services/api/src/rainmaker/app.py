@@ -650,6 +650,50 @@ def create_app() -> FastAPI:
             state.admission.finished(agent_key)
 
     # ─────────────────────────────────────────────────────────── the front door
+    @app.get("/api/agents")
+    async def agents() -> dict[str, Any]:
+        """Every published agent, for the console's picker.
+
+        The console belongs to the platform, so it can see its tenants. This is not the endpoint
+        a stranger on a customer's website reaches — that one is `front-door`, takes a key, and
+        never lists anything.
+        """
+        # A CUSTOMER'S AGENT FIRST, OURS LAST. The console opens on whichever comes back first,
+        # and Rainmaker's own agent is the weakest demo of the set: it sells the thing you are
+        # already looking at, and its tour opens this console inside this console. A customer
+        # selling GPU-hours has a rate card, a competitor and a site to walk you round.
+        rows = sorted(
+            state.agents.list_agents(),
+            key=lambda row: (row["tenant"] == LIV_TENANT, row["tenant"]),
+        )
+        listed = []
+        for row in rows:
+            spec = state.agents.live(row["tenant"], row["agent_id"])
+            if spec is None:
+                continue
+            listed.append(
+                {
+                    "key": row["public_key"],
+                    "name": spec.name,
+                    "company": spec.company,
+                    "portrait": spec.portrait,
+                    "sells": next(
+                        (t.unit_name for t in spec.pricing if t.unit_amount), ""
+                    ),
+                    # WHICH AGENT MAKES THE BEST DEMO, decided by what is configured rather than
+                    # by which row came back first. One with a tour, a comparison and a price
+                    # can run all ten steps; one without will fall through to the model at three
+                    # of them, which is the version somebody clicks first and judges by.
+                    "complete": bool(
+                        spec.tour
+                        and spec.competitors
+                        and any(tier.unit_amount for tier in spec.pricing)
+                    ),
+                    "version": spec.version,
+                }
+            )
+        return {"agents": listed}
+
     @app.get("/api/agents/front-door")
     async def front_door(key: str = "") -> dict[str, Any]:
         """Who is answering, and what their form asks for — before the socket is opened.

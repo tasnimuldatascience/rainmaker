@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
     <title>Tessera Compute — GPUs by the hour</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <!--
       A CUSTOMER'S WEBSITE, NOT OURS.
 
@@ -16,203 +22,337 @@
       Nothing here shares a stylesheet, a font or a colour with the console. That is the point —
       if the widget needed our CSS it would not survive contact with a real marketing site.
 
-      IT IS ALSO WHAT THEIR OWN AGENT TOURS. The guide step opens #capacity and #pricing on this
-      page and narrates them, which is why the anchors and the headings the tour scrolls to are
-      load-bearing rather than decoration.
+      IT IS ALSO WHAT THEIR OWN AGENT TOURS. The guide step opens this page and scrolls to
+      "Available now" and "Per GPU-hour", so those headings are load-bearing rather than
+      decoration: rename one and the tour lands on the wrong part of the page.
     -->
     <style>
-      :root { color-scheme: dark; }
-      * { box-sizing: border-box; }
+      :root {
+        color-scheme: dark;
+        --ink: #e7ecf3;
+        --ink-2: #9aa7b8;
+        --ink-3: #66748a;
+        --bg: #06080c;
+        --panel: #0c1017;
+        --panel-2: #111722;
+        --line: #1a2130;
+        --line-2: #26303f;
+        --mint: #3ddc97;
+        --mint-dim: #16301f;
+        --violet: #8b7cff;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html { scroll-behavior: smooth; }
       body {
-        margin: 0;
-        font-family: "IBM Plex Sans", "Inter", system-ui, -apple-system, sans-serif;
-        color: #e9edf2;
-        background: #0a0d12;
+        font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: var(--bg);
         line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
       }
-      code, .mono, td.num, th.num {
-        font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-      }
-      header {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 20px 6vw; border-bottom: 1px solid #1b222c;
-        background: rgba(10, 13, 18, 0.9); position: sticky; top: 0; backdrop-filter: blur(8px);
-      }
-      .brand { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
-      .brand span { color: #4ade9b; }
-      nav a { margin-left: 24px; color: #93a1b3; text-decoration: none; font-size: 14px; }
-      nav a:hover { color: #e9edf2; }
-      .hero { padding: 12vh 6vw 8vh; max-width: 860px; }
-      .kicker {
-        display: inline-block; padding: 4px 11px; border-radius: 999px; font-size: 12px;
-        letter-spacing: 0.08em; text-transform: uppercase; color: #4ade9b;
-        border: 1px solid #1f4a39; background: #0e1a16; margin-bottom: 20px;
-      }
-      .hero h1 {
-        font-size: clamp(2.2rem, 5.4vw, 3.6rem); line-height: 1.08; margin: 0 0 20px;
-        letter-spacing: -0.03em;
-      }
-      .hero p { font-size: 19px; color: #93a1b3; margin: 0 0 30px; max-width: 62ch; }
-      .cta {
-        display: inline-block; padding: 13px 24px; border-radius: 8px;
-        background: #4ade9b; color: #06120c; text-decoration: none; font-size: 15px;
-        font-weight: 650;
-      }
-      .cta.ghost {
-        background: transparent; color: #e9edf2; border: 1px solid #263141; margin-left: 10px;
-      }
-      section { padding: 0 6vw 9vh; max-width: 980px; }
-      h2 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.01em; }
-      .sub { color: #93a1b3; font-size: 15px; margin: 0 0 22px; }
-      table { border-collapse: collapse; width: 100%; background: #0e131a; border-radius: 10px; }
-      th, td {
-        text-align: left; padding: 13px 16px; border-bottom: 1px solid #1b222c; font-size: 15px;
-      }
-      th {
-        font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: #7b8a9d;
-        font-weight: 600;
-      }
-      tr:last-child td { border-bottom: 0; }
-      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-      .free { color: #4ade9b; }
-      .none { color: #7b8a9d; }
-      .rates { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
-      .rate {
-        border: 1px solid #1b222c; border-radius: 12px; padding: 20px; background: #0e131a;
-      }
-      .rate.pick { border-color: #1f4a39; background: #0d1714; }
-      .rate h3 { margin: 0 0 4px; font-size: 15px; color: #93a1b3; font-weight: 600; }
-      .rate .big {
-        font-size: 30px; font-weight: 660; letter-spacing: -0.02em;
+      .mono, code, td.num, .rate .big, .cap-num {
+        font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
         font-variant-numeric: tabular-nums;
       }
-      .rate .per { color: #7b8a9d; font-size: 13px; }
-      .rate p { margin: 12px 0 0; font-size: 14px; color: #93a1b3; }
-      footer {
-        padding: 26px 6vw; border-top: 1px solid #1b222c; font-size: 13px; color: #7b8a9d;
+      .wrap { inline-size: min(72rem, 100% - 10vw); margin-inline: auto; }
+
+      /* ── chrome ─────────────────────────────────────────────────────── */
+      header {
+        position: sticky; top: 0; z-index: 20;
+        border-block-end: 1px solid var(--line);
+        background: rgb(6 8 12 / 0.82); backdrop-filter: blur(14px) saturate(1.4);
       }
-      .built { margin-top: 8px; font-size: 12px; color: #55606f; }
+      .bar { display: flex; align-items: center; gap: 28px; padding-block: 16px; }
+      .brand {
+        display: flex; align-items: center; gap: 9px;
+        font-size: 16px; font-weight: 700; letter-spacing: -0.02em;
+      }
+      .brand i {
+        inline-size: 22px; block-size: 22px; border-radius: 6px; display: block;
+        background: linear-gradient(140deg, var(--mint), var(--violet));
+      }
+      nav { margin-inline-start: auto; display: flex; gap: 26px; }
+      nav a {
+        color: var(--ink-2); text-decoration: none; font-size: 14px; font-weight: 500;
+        transition: color 0.15s ease;
+      }
+      nav a:hover { color: var(--ink); }
+      .btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 10px 18px; border-radius: 8px; text-decoration: none;
+        font-size: 14px; font-weight: 600; border: 1px solid transparent;
+        transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      }
+      .btn:hover { transform: translateY(-1px); }
+      .btn-primary { background: var(--mint); color: #04120b; }
+      .btn-ghost { border-color: var(--line-2); color: var(--ink); }
+      .btn-ghost:hover { border-color: var(--ink-3); }
+
+      /* ── hero ───────────────────────────────────────────────────────── */
+      .hero { padding-block: clamp(64px, 11vh, 128px) 72px; position: relative; overflow: hidden; }
+      .hero::before {
+        content: ""; position: absolute; inset-block-start: -40%; inset-inline-start: 50%;
+        inline-size: 60rem; block-size: 60rem; transform: translateX(-50%);
+        background: radial-gradient(circle, rgb(61 220 151 / 0.10), transparent 62%);
+        pointer-events: none;
+      }
+      .hero > * { position: relative; }
+      .kicker {
+        display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 8px;
+        border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel);
+        font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--ink-2);
+      }
+      .kicker b { color: var(--mint); font-weight: 600; }
+      .kicker i {
+        inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--mint);
+        box-shadow: 0 0 0 3px rgb(61 220 151 / 0.18);
+      }
+      h1 {
+        margin-block: 26px 20px;
+        font-size: clamp(2.6rem, 6.2vw, 4.4rem); line-height: 1.02;
+        letter-spacing: -0.045em; font-weight: 700; max-inline-size: 18ch;
+      }
+      h1 em { font-style: normal; color: var(--mint); }
+      .lede { font-size: clamp(1.05rem, 1.6vw, 1.2rem); color: var(--ink-2); max-inline-size: 56ch; }
+      .cta-row { display: flex; gap: 12px; margin-block-start: 34px; flex-wrap: wrap; }
+      .proof {
+        display: flex; gap: 40px; flex-wrap: wrap; margin-block-start: 56px;
+        padding-block-start: 30px; border-block-start: 1px solid var(--line);
+      }
+      .proof div { display: grid; gap: 2px; }
+      .proof b { font-size: 26px; letter-spacing: -0.02em; }
+      .proof span { font-size: 13px; color: var(--ink-3); }
+
+      /* ── sections ───────────────────────────────────────────────────── */
+      section { padding-block: 72px; border-block-start: 1px solid var(--line); }
+      .eyebrow {
+        font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+        color: var(--mint);
+      }
+      h2 {
+        font-size: clamp(1.7rem, 3vw, 2.3rem); letter-spacing: -0.03em; font-weight: 700;
+        margin-block: 10px 8px;
+      }
+      .sub { color: var(--ink-2); max-inline-size: 62ch; }
+
+      /* capacity */
+      .cap { margin-block-start: 34px; border: 1px solid var(--line); border-radius: 14px;
+             overflow: hidden; background: var(--panel); }
+      .cap-head, .cap-row {
+        display: grid; grid-template-columns: 1.1fr 1.4fr 1.2fr auto; gap: 20px;
+        padding: 15px 22px; align-items: center;
+      }
+      .cap-head {
+        font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3);
+        background: var(--panel-2); border-block-end: 1px solid var(--line); font-weight: 600;
+      }
+      .cap-row { border-block-end: 1px solid var(--line); font-size: 15px; }
+      .cap-row:last-child { border-block-end: 0; }
+      .cap-row b { font-weight: 600; }
+      .cap-num { text-align: end; font-size: 15px; font-weight: 500; }
+      .up { color: var(--mint); }
+      .wait { color: var(--ink-3); }
+      .dot { display: inline-block; inline-size: 7px; block-size: 7px; border-radius: 50%;
+             background: var(--mint); margin-inline-end: 9px; vertical-align: 1px; }
+      .dot.off { background: var(--ink-3); }
+
+      /* pricing */
+      .rates { display: grid; gap: 18px; margin-block-start: 34px;
+               grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+      .rate {
+        position: relative; padding: 26px; border-radius: 14px;
+        border: 1px solid var(--line); background: var(--panel);
+        transition: border-color 0.2s ease, transform 0.2s ease;
+      }
+      .rate:hover { border-color: var(--line-2); transform: translateY(-2px); }
+      .rate.pick { border-color: rgb(61 220 151 / 0.45); background:
+        linear-gradient(180deg, var(--mint-dim), var(--panel) 55%); }
+      .rate .tag {
+        position: absolute; inset-block-start: -10px; inset-inline-start: 26px;
+        padding: 3px 10px; border-radius: 999px; background: var(--mint); color: #04120b;
+        font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+      }
+      .rate h3 { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+      .rate .big { display: block; font-size: 40px; font-weight: 600; letter-spacing: -0.04em;
+                   margin-block: 10px 2px; }
+      .rate .per { font-size: 13px; color: var(--ink-3); }
+      .rate ul { list-style: none; margin-block-start: 20px; display: grid; gap: 9px; }
+      .rate li { font-size: 14px; color: var(--ink-2); padding-inline-start: 22px; position: relative; }
+      .rate li::before {
+        content: "✓"; position: absolute; inset-inline-start: 0; color: var(--mint);
+        font-size: 12px; font-weight: 700;
+      }
+
+      /* code block */
+      .term {
+        margin-block-start: 30px; border-radius: 14px; overflow: hidden;
+        border: 1px solid var(--line); background: #04060a;
+      }
+      .term-bar {
+        display: flex; align-items: center; gap: 7px; padding: 12px 16px;
+        background: var(--panel-2); border-block-end: 1px solid var(--line);
+      }
+      .term-bar i { inline-size: 10px; block-size: 10px; border-radius: 50%; background: var(--line-2); }
+      .term-bar span { margin-inline-start: 10px; font-size: 12px; color: var(--ink-3); }
+      .term pre { padding: 22px; overflow-x: auto; font-size: 13.5px; line-height: 2; }
+      .term .c { color: var(--ink-3); }
+      .term .k { color: var(--mint); }
+      .term .s { color: var(--violet); }
+
+      footer {
+        padding-block: 40px 60px; border-block-start: 1px solid var(--line);
+        color: var(--ink-3); font-size: 13px;
+      }
+      .built { margin-block-start: 10px; color: #46505f; font-size: 12px; max-inline-size: 60ch; }
     </style>
   </head>
   <body>
     <header>
-      <div class="brand">Tessera<span>Compute</span></div>
-      <nav>
-        <a href="#capacity">Capacity</a>
-        <a href="#pricing">Pricing</a>
-        <a href="#docs">Docs</a>
-        <a href="#contact">Contact</a>
-      </nav>
+      <div class="wrap bar">
+        <span class="brand"><i></i>Tessera Compute</span>
+        <nav>
+          <a href="#capacity">Capacity</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#start">Docs</a>
+        </nav>
+        <a class="btn btn-ghost" href="#pricing">Rate card</a>
+      </div>
     </header>
 
-    <div class="hero">
-      <span class="kicker">H100 · A100 · InfiniBand</span>
-      <h1>GPUs by the hour, up in ninety seconds.</h1>
-      <p>
-        No quota request, no sales cycle, no egress bill. Take sixty-four nodes for a week and
-        give them back. CUDA, PyTorch and NCCL are already configured when the node comes up.
+    <div class="wrap hero">
+      <span class="kicker"><i></i>H100 · A100 · <b>392 GPUs free right now</b></span>
+      <h1>GPUs by the hour. Up in <em>ninety seconds</em>.</h1>
+      <p class="lede">
+        No quota request, no procurement call, no egress bill. Take sixty-four nodes for a week
+        and hand them back. CUDA, PyTorch and NCCL are matched and ready when the node boots.
       </p>
-      <a class="cta" href="#pricing">See the rate card</a>
-      <a class="cta ghost" href="#capacity">What's free now</a>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#pricing">See the rate card</a>
+        <a class="btn btn-ghost" href="#capacity">What is free now</a>
+      </div>
+      <div class="proof">
+        <div><b>~90s</b><span>node ready</span></div>
+        <div><b>3.2 Tb/s</b><span>InfiniBand in-cluster</span></div>
+        <div><b>$0</b><span>ingress and egress</span></div>
+        <div><b>per second</b><span>billing, stops with the node</span></div>
+      </div>
     </div>
 
     <section id="capacity">
-      <h2>Available now</h2>
-      <p class="sub">
-        Live capacity, updated continuously. We do not quote what we cannot give you today.
-      </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Region</th>
-            <th>Card</th>
-            <th>Interconnect</th>
-            <th class="num">Free now</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>us-east-2</td>
-            <td class="mono">H100 80GB SXM</td>
-            <td>3.2 Tb/s InfiniBand</td>
-            <td class="num free">128 GPUs</td>
-          </tr>
-          <tr>
-            <td>eu-west-1</td>
-            <td class="mono">H100 80GB SXM</td>
-            <td>3.2 Tb/s InfiniBand</td>
-            <td class="num free">64 GPUs</td>
-          </tr>
-          <tr>
-            <td>eu-west-1</td>
-            <td class="mono">A100 80GB</td>
-            <td>1.6 Tb/s</td>
-            <td class="num free">200 GPUs</td>
-          </tr>
-          <tr>
-            <td>ap-south-1</td>
-            <td class="mono">H100 80GB SXM</td>
-            <td>3.2 Tb/s InfiniBand</td>
-            <td class="num none">waitlist</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section id="pricing">
-      <h2>Per GPU-hour</h2>
-      <p class="sub">Billed per second of node time. Storage and transfer are included.</p>
-      <div class="rates">
-        <div class="rate">
-          <h3>On-demand</h3>
-          <div class="big">$3.60</div>
-          <div class="per">per GPU-hour</div>
-          <p>H100 80GB. No commitment, stop whenever. Per-second billing.</p>
-        </div>
-        <div class="rate pick">
-          <h3>Reserved</h3>
-          <div class="big">$2.40</div>
-          <div class="per">per GPU-hour</div>
-          <p>Same hardware, one month or more. About a third below on-demand.</p>
-        </div>
-        <div class="rate">
-          <h3>Cluster</h3>
-          <div class="big">Quoted</div>
-          <div class="per">32 nodes and up</div>
-          <p>Dedicated interconnect and a named engineer. Talk to us.</p>
+      <div class="wrap">
+        <span class="eyebrow">Available now</span>
+        <h2>Live capacity, not a waitlist</h2>
+        <p class="sub">
+          Updated continuously. We do not quote what we cannot hand you today — if a region is
+          full, it says so here before you talk to anyone.
+        </p>
+        <div class="cap">
+          <div class="cap-head">
+            <span>Region</span><span>Card</span><span>Interconnect</span><span>Free now</span>
+          </div>
+          <div class="cap-row">
+            <b><span class="dot"></span>us-east-2</b>
+            <span class="mono">H100 80GB SXM</span>
+            <span>3.2 Tb/s InfiniBand</span>
+            <span class="cap-num up">128 GPUs</span>
+          </div>
+          <div class="cap-row">
+            <b><span class="dot"></span>eu-west-1</b>
+            <span class="mono">H100 80GB SXM</span>
+            <span>3.2 Tb/s InfiniBand</span>
+            <span class="cap-num up">64 GPUs</span>
+          </div>
+          <div class="cap-row">
+            <b><span class="dot"></span>eu-west-1</b>
+            <span class="mono">A100 80GB</span>
+            <span>1.6 Tb/s</span>
+            <span class="cap-num up">200 GPUs</span>
+          </div>
+          <div class="cap-row">
+            <b><span class="dot off"></span>ap-south-1</b>
+            <span class="mono">H100 80GB SXM</span>
+            <span>3.2 Tb/s InfiniBand</span>
+            <span class="cap-num wait">waitlist</span>
+          </div>
         </div>
       </div>
     </section>
 
-    <section id="docs">
-      <h2>Start in one command</h2>
-      <p class="sub">
-        A node comes up with the drivers, the runtime and the collectives library already
-        matched. Nothing to build.
-      </p>
-      <table>
-        <tbody>
-          <tr>
-            <td class="mono">tessera up --gpus 8 --card h100 --region eu-west-1</td>
-            <td class="num none">~90s</td>
-          </tr>
-          <tr>
-            <td class="mono">tessera scp ./train ~ &amp;&amp; tessera run torchrun train.py</td>
-            <td class="num none">your code</td>
-          </tr>
-          <tr>
-            <td class="mono">tessera down</td>
-            <td class="num none">billing stops</td>
-          </tr>
-        </tbody>
-      </table>
+    <section id="pricing">
+      <div class="wrap">
+        <span class="eyebrow">Pricing</span>
+        <h2>Per GPU-hour</h2>
+        <p class="sub">
+          Billed per second of node time. Storage and transfer are included, and there is no
+          control-plane fee on top.
+        </p>
+        <div class="rates">
+          <div class="rate">
+            <h3>On-demand</h3>
+            <span class="big">$3.60</span>
+            <span class="per">per GPU-hour</span>
+            <ul>
+              <li>H100 80GB SXM</li>
+              <li>No commitment, stop whenever</li>
+              <li>Per-second billing</li>
+            </ul>
+          </div>
+          <div class="rate pick">
+            <span class="tag">Most teams</span>
+            <h3>Reserved</h3>
+            <span class="big">$2.40</span>
+            <span class="per">per GPU-hour</span>
+            <ul>
+              <li>Same hardware, one month or more</li>
+              <li>About a third below on-demand</li>
+              <li>Capacity held for you</li>
+            </ul>
+          </div>
+          <div class="rate">
+            <h3>Cluster</h3>
+            <span class="big">Quoted</span>
+            <span class="per">32 nodes and up</span>
+            <ul>
+              <li>Dedicated interconnect</li>
+              <li>A named engineer</li>
+              <li>Custom term</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <footer id="contact">
-      Tessera Compute · us-east-2, eu-west-1, ap-south-1 · support answered by a human 24/7
-      <div class="built">
-        An invented company, built to demonstrate an embedded sales agent. The agent in the
-        corner is real.
+    <section id="start">
+      <div class="wrap">
+        <span class="eyebrow">Getting started</span>
+        <h2>Three commands, then it is training</h2>
+        <p class="sub">
+          A node boots with the driver, the runtime and the collectives library already matched.
+          Nothing to build, nothing to pin.
+        </p>
+        <div class="term">
+          <div class="term-bar">
+            <i></i><i></i><i></i><span>bash</span>
+          </div>
+          <pre class="mono"><span class="c"># a cluster of eight, in the region with capacity</span>
+<span class="k">tessera</span> up --gpus <span class="s">8</span> --card <span class="s">h100</span> --region <span class="s">eu-west-1</span>
+
+<span class="c"># your code, your data, your launcher</span>
+<span class="k">tessera</span> run torchrun --nproc-per-node <span class="s">8</span> train.py
+
+<span class="c"># billing stops with the node</span>
+<span class="k">tessera</span> down</pre>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        Tessera Compute · us-east-2 · eu-west-1 · ap-south-1 · support answered by a human, 24/7
+        <p class="built">
+          An invented company, built to demonstrate an embedded sales agent. The agent in the
+          corner is real: its own name, its own rate card, and one script tag.
+        </p>
       </div>
     </footer>
 

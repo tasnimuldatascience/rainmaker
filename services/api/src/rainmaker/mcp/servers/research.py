@@ -146,12 +146,37 @@ async def browse(
                 pass
 
         text = await page.evaluate("() => document.body?.innerText ?? ''")
+
+        # WHERE THE PAGE WOULD BE SCROLLED TO, AS A FRACTION OF ITS HEIGHT. The caller gets the
+        # WHOLE page as one image and the position within it that matters, so the console can
+        # scroll to that spot in front of the prospect instead of cutting to a still of the
+        # destination. Watching a page get scrolled is what makes the demo read as a browser
+        # being driven; a screenshot of the right part of the page reads as a screenshot.
+        metrics = await page.evaluate(
+            """() => ({
+                scrollY: window.scrollY,
+                viewport: window.innerHeight,
+                total: Math.max(document.body?.scrollHeight ?? 0, window.innerHeight),
+            })"""
+        )
         frame = ""
         if screenshot:
-            raw = await page.screenshot(type="jpeg", quality=JPEG_QUALITY)
+            # Full page when there is somewhere to scroll to, so the client has the material to
+            # animate with; the visible viewport otherwise, because a tall image of a page
+            # nobody is going to move through is bytes for nothing.
+            raw = await page.screenshot(
+                type="jpeg", quality=JPEG_QUALITY, full_page=bool(scrolled)
+            )
             frame = base64.b64encode(raw).decode()
 
+        total = max(float(metrics.get("total") or 1), 1.0)
+        viewport = max(float(metrics.get("viewport") or 1), 1.0)
         return {
+            "full_page": bool(scrolled and screenshot),
+            # 0..1: how far down the full-page image the interesting part starts.
+            "scroll_ratio": round(min(float(metrics.get("scrollY") or 0) / total, 1.0), 4),
+            # How much of that image is one screenful, so the client can size its window.
+            "viewport_ratio": round(min(viewport / total, 1.0), 4),
             "url": page.url,
             "title": title,
             "status": response.status if response else 0,

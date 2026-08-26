@@ -243,9 +243,15 @@ def build_system_prompt(
         CALL_RULES,
     ]
     if claims:
+        # WHAT THEY SELL, IN ONE LINE, BEFORE THE DETAIL. A list of facts leaves a small model to
+        # infer the product from them, and what it infers is "a platform" — the generic noun that
+        # fits anything and sells nothing. The first fact is the positioning line, so it is
+        # promoted to a headline rather than left as item one of nine.
+        headline = spec.knowledge[0].text if spec and spec.knowledge else ""
+        sells = f"What {profile.company} sells, in one line: {headline}\n\n" if headline else ""
         parts.append(
-            f"About {profile.company}, the ONLY claims you may make about it. If something is "
-            f"not below, say you will find out:\n\n{claims}"
+            f"{sells}About {profile.company}, the ONLY claims you may make about it. If "
+            f"something is not below, say you will find out:\n\n{claims}"
         )
     else:
         # An agent with no knowledge is not a broken agent, it is a new one. It may still

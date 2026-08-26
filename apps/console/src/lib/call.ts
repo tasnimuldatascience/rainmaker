@@ -66,6 +66,31 @@ const DEFAULT_DOOR: FrontDoor = {
   require_work_email: true,
 };
 
+/** One published agent, as the console's picker lists them. */
+export interface AgentRow {
+  key: string;
+  name: string;
+  company: string;
+  portrait?: string;
+  /** What their pricing counts: "GPU-hour", "seat". Empty when nothing is priced. */
+  sells?: string;
+  /** Has a tour, a comparison and a price — so it can run the whole call rather than three
+   *  quarters of it. The console opens on one of these. */
+  complete?: boolean;
+  version: number;
+}
+
+/** Every published agent. Console-only — a stranger on a customer's site gets `frontDoor`. */
+export async function publishedAgents(): Promise<AgentRow[]> {
+  try {
+    const response = await fetch("/api/agents");
+    if (!response.ok) return [];
+    return (await response.json()).agents ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** Ask who is answering. Never throws: a form that cannot render is worse than a plain one. */
 export async function frontDoor(agentKey = ""): Promise<FrontDoor> {
   try {
@@ -95,7 +120,20 @@ export interface Engines {
 /** Something Liv put on the stage. The most recent of each kind is kept. */
 export interface Panels {
   facts?: { company: string; domain: string; facts: string[]; pages_read?: string[] };
-  browser?: { state: string; url: string; title?: string; label?: string; frame?: string };
+  browser?: {
+    state: string;
+    url: string;
+    title?: string;
+    label?: string;
+    frame?: string;
+    scrolled_to?: string;
+    /** True when `frame` is the whole page rather than one screenful. */
+    full_page?: boolean;
+    /** 0..1 — how far down that image the part she is talking about begins. */
+    scroll_ratio?: number;
+    /** 0..1 — how much of the image is one screenful. */
+    viewport_ratio?: number;
+  };
   slots?: { slots: Slot[]; failed?: string };
   pricing?: { company: string; size?: string; tiers: Tier[]; note?: string };
   comparison?: { company: string; rivals: Rival[] };
