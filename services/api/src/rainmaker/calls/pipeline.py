@@ -312,6 +312,123 @@ async def cap_sentences(
         await tokens.aclose()
 
 
+
+#: A figure with money attached, in the shapes a model actually writes it.
+_NUMBER_WORDS = (
+    "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|"
+    "forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million"
+)
+_MONEY = re.compile(
+    # "$50", "£1,250.00", "$4.8k"
+    r"[$£€]\s?\d[\d,]*(?:\.\d+)?(?:\s?[km]\b)?"
+    # "2,400 dollars", "45 pence"
+    r"|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars|pounds|euros|cents|pence|usd|gbp|eur)\b"
+    # "fifty dollars", "two thousand pounds" — what a voice agent actually says out loud
+    rf"|\b(?:{_NUMBER_WORDS})(?:[\s-]+(?:{_NUMBER_WORDS}))*\s+"
+    r"(?:dollars|pounds|euros|cents|pence)\b",
+    re.IGNORECASE,
+)
+
+#: What replaces one. Always true, and grammatical where a figure usually sits: "it's $50"
+#: becomes "it's the figure on your screen", and "starting from $50" keeps its preposition.
+PRICE_STANDIN = "the figure on your screen"
+
+#: Anything that could be the start of a figure. Holding back only once one of these has
+#: appeared is what keeps this off the latency path: ordinary speech has no digits in it, so a
+#: turn without numbers is not delayed by a single token.
+_MONEY_MAYBE = re.compile(rf"[$£€\d]|\b(?:{_NUMBER_WORDS})\b", re.IGNORECASE)
+
+#: The words a money phrase is built from, besides the numbers: "fifty DOLLARS".
+_CURRENCY_NOUNS = ("dollars", "pounds", "euros", "cents", "pence", "usd", "gbp", "eur")
+
+#: Every prefix of every word that could still become part of a figure. "f" might be "fifty";
+#: "doll" might be "dollars"; "GPU" is never going to be either.
+_WORD_PREFIXES = frozenset(
+    word[:n]
+    for word in (*_NUMBER_WORDS.split("|"), *_CURRENCY_NOUNS)
+    for n in range(1, len(word) + 1)
+)
+
+#: A complete word that a figure can be made of.
+_MONEY_ATOM = re.compile(
+    rf"^(?:[$£€]?\d[\d,.]*|(?:{_NUMBER_WORDS})|{'|'.join(_CURRENCY_NOUNS)})$",
+    re.IGNORECASE,
+)
+
+
+def _could_still_be_money(text: str) -> bool:
+    """Whether `text` might yet turn into a figure if more of it arrives.
+
+    THE ALTERNATIVE WAS A FIXED WINDOW, and it was worse: holding everything for forty-six
+    characters after any digit delays an agent whose job includes saying "sixty-four nodes are
+    free right now". This releases as soon as a word arrives that no figure could contain —
+    usually the very next one.
+    """
+    body = text.strip()
+    if not body:
+        return True
+    parts = [part for part in re.split(r"[\s,-]+", body) if part]
+    *complete, last = parts
+    if any(not _MONEY_ATOM.match(word) for word in complete):
+        return False
+    # A LONE CURRENCY SYMBOL IS THE MOST IMPORTANT PARTIAL THERE IS. Token by token, "$50"
+    # arrives as "$" and then "5": releasing the "$" on its own put the symbol beyond recall and
+    # the price was spoken with only its digits redacted.
+    if last in ("$", "£", "€"):
+        return True
+    return bool(_MONEY_ATOM.match(last)) or last.lower() in _WORD_PREFIXES
+
+
+def _figure_start(text: str) -> int | None:
+    """Where a figure that is still arriving begins, if one is.
+
+    Everything before it can be spoken; everything from it has to wait, because a price is not
+    a price until the currency word lands.
+    """
+    for match in _MONEY_MAYBE.finditer(text):
+        if _could_still_be_money(text[match.start() :]):
+            return match.start()
+    # A half-arrived word that could become a number: "That's f" holds, "That's GPU" does not.
+    cut = text.rfind(" ") + 1
+    if cut < len(text) and text[cut:].lower() in _WORD_PREFIXES:
+        return cut
+    return None
+
+
+async def guard_prices(stream: AsyncIterator[str], allowed: bool = False) -> AsyncIterator[str]:
+    """Stop a figure the MODEL invented from being said out loud.
+
+    THIS IS THE GUARD THE WHOLE PRICING DESIGN RESTED ON AND DID NOT HAVE. Everything else was
+    in place — the quote is arithmetic, the sentence stating it is written in code, the prompt
+    tells the model the number has already been said — and then a 1.5B model, asked what was
+    available, said "starting from $50 per GPU per hour" about a product that charges $2.40.
+    Nothing stopped it, because nothing was looking. A rule the model is asked to follow is a
+    request. This is the enforcement.
+
+    ONLY THE MODEL'S STREAM PASSES THROUGH HERE. Lines the platform writes — the quote, the
+    checkout, the times offered — never reach it, which is exactly the distinction being drawn:
+    the platform may state a figure it computed, and the model may not state one at all.
+
+    Streaming, and cheap where it counts. Tokens are held back only while they could still be
+    becoming a figure, so a turn with no numbers in it is not delayed at all and a turn that
+    mentions sixty-four nodes is delayed by one word.
+    """
+    if allowed:
+        async for token in stream:
+            yield token
+        return
+
+    pending = ""
+    async for token in stream:
+        pending += token
+        start = _figure_start(pending)
+        safe, pending = (pending[:start], pending[start:]) if start is not None else (pending, "")
+        if safe:
+            yield _MONEY.sub(PRICE_STANDIN, safe)
+    if pending:
+        yield _MONEY.sub(PRICE_STANDIN, pending)
+
+
 # ───────────────────────────────────────────────────────────── the turn loop
 @dataclass
 class TurnResult:
@@ -370,11 +487,15 @@ class CallPipeline:
         avatar: Avatar | None = None,
         disclosure: Disclosure | None = None,
         max_sentences: int = MAX_SENTENCES,
+        may_speak_prices: bool = False,
     ):
         self.stt = stt
         self.llm = llm
         self.tts = tts
         self.max_sentences = max_sentences
+        #: Whether the MODEL may state a figure. False everywhere by default; the platform's own
+        #: computed sentences do not go through the model path and are unaffected.
+        self.may_speak_prices = may_speak_prices
         self.avatar = avatar or PlaceholderAvatar()
         self.disclosure = disclosure or Disclosure()
         self._disclosed = False
@@ -436,7 +557,8 @@ class CallPipeline:
 
         async def token_stream() -> AsyncIterator[str]:
             nonlocal first_token_seen
-            async for token in cap_sentences(self.llm.stream(transcript, context), self.max_sentences):
+            capped = cap_sentences(self.llm.stream(transcript, context), self.max_sentences)
+            async for token in guard_prices(capped, self.may_speak_prices):
                 if not first_token_seen:
                     first_token_seen = True
                     budget.mark(Stage.LLM)

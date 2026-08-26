@@ -16,6 +16,7 @@ so the tests below try to get a turn out of the pipeline without it.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 
 import pytest
@@ -180,14 +181,19 @@ class TestTheTurnLoop:
         assert llm.saw_prompt == "how much does it cost"
 
     def test_the_response_is_the_tokens_joined(self):
-        call = CallPipeline(stt=FakeSTT(), llm=FakeLLM("Forty pounds a seat."), tts=FakeTTS())
-        assert self.run(call).response.strip() == "Forty pounds a seat."
+        # DELIBERATELY NOT A PRICE. This used to say "Forty pounds a seat", which now comes out
+        # redacted — correctly, and see `TestTheModelCannotStateAPrice`. A fixture that trips a
+        # guardrail tests the guardrail rather than the thing it was written for.
+        call = CallPipeline(stt=FakeSTT(), llm=FakeLLM("It runs on your own hardware."), tts=FakeTTS())
+        assert self.run(call).response.strip() == "It runs on your own hardware."
 
     def test_synthesis_sees_the_tokens_as_they_stream(self):
         """THE WHOLE TRICK. TTS is handed the token stream, not the finished string -- if it were
         awaited, the naive column of the table in the module docstring is what you get."""
         tts = FakeTTS()
-        call = CallPipeline(stt=FakeSTT(), llm=FakeLLM("one two three four"), tts=tts)
+        # Not number words: "one two three four" is four things a figure could be made of, so
+        # the price guard holds them waiting for a currency to land and the stream arrives whole.
+        call = CallPipeline(stt=FakeSTT(), llm=FakeLLM("quick brown fox jumps"), tts=tts)
         self.run(call)
         assert len(tts.tokens_seen) >= 4, tts.tokens_seen
 
@@ -254,3 +260,81 @@ class TestThePlaceholderAvatar:
             return [chunk async for chunk in PlaceholderAvatar().render(audio())]
 
         asyncio.run(go())
+
+
+class TestTheModelCannotStateAPrice:
+    """OBSERVED ON A REAL CALL, WHICH IS WHY THIS FILE HAS THIS CLASS. Asked what capacity was
+    available, Qwen said "starting from $50 per GPU per hour" about a product whose rate card
+    says $2.40. Every other part of the pricing design was already right — the quote is
+    arithmetic, the sentence stating it is written in code, the prompt says the figure has
+    already been read out — and none of it mattered, because nothing was checking.
+
+    The platform's own computed sentences do not pass through this. That is the distinction:
+    the platform may state a figure it worked out, and the model may not state one at all.
+    """
+
+    @staticmethod
+    async def guarded(text: str, chunk: int = 3, allowed: bool = False) -> str:
+        from rainmaker.calls.pipeline import guard_prices
+
+        async def feed():
+            for i in range(0, len(text), chunk):
+                yield text[i : i + chunk]
+
+        return "".join([token async for token in guard_prices(feed(), allowed)])
+
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "We rent GPUs by the hour, starting from $50 per GPU per hour.",
+            "Would $4,800 per month work for you?",
+            "That's fifty dollars, roughly.",
+            "It costs about 2,400 dollars a month.",
+            "Around £1,250.00 all in.",
+        ],
+    )
+    async def test_a_figure_never_reaches_the_synthesiser(self, said: str):
+        spoken = await self.guarded(said)
+        assert not re.search(r"[$£€]\s?\d", spoken), spoken
+        assert "dollars" not in spoken and "pounds" not in spoken
+        assert "figure on your screen" in spoken
+
+    async def test_the_redaction_does_not_depend_on_how_tokens_arrive(self):
+        """A model streams a word at a time and sometimes a letter at a time. An earlier version
+        emitted "$5" and held "0", turning a price into a stray zero."""
+        said = "That's fifty dollars, or $4,800 a month."
+        outputs = {await self.guarded(said, chunk=n) for n in (1, 2, 3, 5, 8, 40, 500)}
+        assert len(outputs) == 1, outputs
+        assert "$" not in outputs.pop()
+
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "We have 64 nodes free in eu-west-1 right now.",
+            "It comes up in about 90 seconds.",
+            "There are 3 regions.",
+            "Yes, absolutely — that works well for teams your size.",
+        ],
+    )
+    async def test_ordinary_numbers_are_left_alone(self, said: str):
+        """A guard that eats every number makes the agent unable to say how many nodes are free,
+        which is most of what this particular agent is for."""
+        assert await self.guarded(said) == said
+
+    async def test_a_tenant_who_turned_the_guard_off_is_obeyed(self):
+        """`speak_prices` exists, and if a tenant sets it the platform does what it is told —
+        it simply cannot be set without `validate()` making them say it out loud."""
+        said = "It's $50 an hour."
+        assert await self.guarded(said, allowed=True) == said
+
+    async def test_the_platform_still_says_its_own_computed_figure(self):
+        """The quote is read out by `_say`, which never goes near the model path. If this ever
+        starts failing, the guard has been wired in one layer too high."""
+        from rainmaker.agents.quoting import build_quote
+        from rainmaker.agents.spec import AgentSpec, Tier
+
+        spec = AgentSpec(
+            tenant="t", agent_id="a", currency="usd", pricing_period="month",
+            pricing=(Tier("Team", "$40", "", unit_amount=4000, min_seats=1),),
+        )
+        assert "$400" in build_quote(spec, said_seats=10).spoken()
