@@ -247,7 +247,7 @@ class TestWhatTheAgentMayClaim:
 
         spec = liv_spec()
         prompt = build_system_prompt(AgentProfile.of(spec), Prospect(), spec)
-        assert "offline-first" in prompt
+        assert "at any hour" in prompt
         assert "ONLY claims you may make" in prompt
 
     def test_an_agent_with_no_knowledge_is_told_not_to_describe_a_product(self):

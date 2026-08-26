@@ -33,6 +33,52 @@ export type CallPhase =
   | "speaking"
   | "ended";
 
+/** What the front door asks for. Whichever fields the agent asks for are required. */
+export interface Intake {
+  name: string;
+  email: string;
+  company: string;
+}
+
+/**
+ * Who is answering, and what their form asks — fetched before the socket is opened.
+ *
+ * THE AGENT DECIDES WHICH FIELDS EXIST. Ours needs a work address because the domain is what
+ * its research reads; a dental practice asking a patient for their employer is our form wearing
+ * somebody else's brand. Everything else about an agent arrives on the socket after the call
+ * starts, which is too late to draw the form that starts it.
+ */
+export interface FrontDoor {
+  name: string;
+  company: string;
+  portrait?: string;
+  disclosure?: string;
+  fields: string[];
+  ask_company: boolean;
+  require_work_email: boolean;
+}
+
+const DEFAULT_DOOR: FrontDoor = {
+  name: "",
+  company: "",
+  fields: ["name", "email", "company"],
+  ask_company: true,
+  require_work_email: true,
+};
+
+/** Ask who is answering. Never throws: a form that cannot render is worse than a plain one. */
+export async function frontDoor(agentKey = ""): Promise<FrontDoor> {
+  try {
+    const query = agentKey ? `?key=${encodeURIComponent(agentKey)}` : "";
+    const response = await fetch(`/api/agents/front-door${query}`);
+    if (!response.ok) return DEFAULT_DOOR;
+    const body = (await response.json()) as Partial<FrontDoor>;
+    return { ...DEFAULT_DOOR, ...body, fields: body.fields?.length ? body.fields : DEFAULT_DOOR.fields };
+  } catch {
+    return DEFAULT_DOOR;
+  }
+}
+
 export interface Turn {
   who: "agent" | "prospect";
   text: string;
@@ -52,6 +98,9 @@ export interface Panels {
   browser?: { state: string; url: string; title?: string; label?: string; frame?: string };
   slots?: { slots: Slot[]; failed?: string };
   pricing?: { company: string; size?: string; tiers: Tier[]; note?: string };
+  comparison?: { company: string; rivals: Rival[] };
+  quote?: Quote;
+  checkout?: Checkout;
   booking?: { spoken: string; booking_id: string; starts_at: string };
   draft?: { subject: string; body: string; can_send: boolean; why_not?: string };
   note?: { text: string };
@@ -69,14 +118,56 @@ export interface Tier {
   for: string;
 }
 
+/** How the agent's owner positions one competitor. Every line is theirs, never generated. */
+export interface Rival {
+  name: string;
+  positioning: string;
+  against: { dimension: string; ours: string }[];
+}
+
+/** A number with somebody's name on it. Computed on the server; the client only renders it. */
+export interface Quote {
+  tier: string;
+  seats: number;
+  /** The quantity in the tenant's own words: "40 seats", "2,000 GPU-hours". */
+  units: string;
+  unit_name: string;
+  unit_plural: string;
+  seats_from: string;
+  assumed: boolean;
+  company: string;
+  currency: string;
+  period: string;
+  term: string;
+  unit_display: string;
+  subtotal_display: string;
+  discount_display: string;
+  total_display: string;
+  spoken: string;
+}
+
+/** A hosted checkout. The card is entered on the processor's page, never here. */
+export interface Checkout {
+  checkout_id: string;
+  url: string;
+  provider: string;
+  amount_display: string;
+  period: string;
+  description: string;
+  test_mode: boolean;
+  quote?: Quote;
+}
+
 export type Step =
   | "researching"
   | "opening"
   | "discovery"
-  | "showing"
-  | "proposing"
+  | "guide"
+  | "compare"
+  | "quote"
+  | "close"
+  | "pay"
   | "booking"
-  | "pricing"
   | "wrap"
   | "handoff";
 
@@ -89,6 +180,8 @@ export interface CallState {
   speaking: boolean;
   /** True while the microphone is open. */
   listening: boolean;
+  /** True when the mic stays open by itself — a call rather than a walkie-talkie. */
+  handsFree: boolean;
   /** Interim transcript, shown as the prospect speaks. */
   partial: string;
   engines: Engines | null;
@@ -97,7 +190,13 @@ export interface CallState {
   error: string | null;
   micSupported: boolean;
   /** Who she thinks she is talking to, from the address they typed. */
-  contact: { email: string; domain: string; first_name: string; researchable: boolean } | null;
+  contact: {
+    email: string;
+    domain: string;
+    first_name: string;
+    company: string;
+    researchable: boolean;
+  } | null;
   /** Which agent answered. On an embed this is the customer's own, not ours. */
   agent: { name: string; company: string; portrait: string; version: number } | null;
   /** Set when the server turned the call away — at capacity, too many just now. */
@@ -107,8 +206,9 @@ export interface CallState {
   panels: Panels;
   /** Which panel the stage is showing. The newest one that is worth looking at. */
   active: keyof Panels | null;
-  /** Set when the address was rejected at the front door. */
+  /** Set when a field was rejected at the front door, with the field it belongs under. */
   intakeError: string | null;
+  intakeField: string | null;
   booked: boolean;
 }
 
@@ -118,6 +218,7 @@ const IDLE: CallState = {
   caption: "",
   speaking: false,
   listening: false,
+  handsFree: false,
   partial: "",
   engines: null,
   handoff: false,
@@ -131,6 +232,7 @@ const IDLE: CallState = {
   panels: {},
   active: null,
   intakeError: null,
+  intakeField: null,
   booked: false,
 };
 
@@ -185,6 +287,10 @@ export class LiveCall {
   private levelBuffer: Uint8Array<ArrayBuffer> | null = null;
   private smoothed = 0;
   private recognition: RecognitionLike | null = null;
+  /** Set while hands-free wants the mic open. Distinct from `listening`, which is whether it
+   *  IS open — the two differ every time she speaks. */
+  private wantsMic = false;
+  private restart: number | null = null;
   private listeners = new Set<(state: CallState) => void>();
   private state: CallState = { ...IDLE, micSupported: recognitionCtor() !== null };
 
@@ -219,21 +325,22 @@ export class LiveCall {
 
   // ── the socket ─────────────────────────────────────────────────────────
   /**
-   * Open the socket and, if an address was given, start the guided call.
+   * Open the socket and, if the form was filled in, start the guided call.
    *
-   * WITHOUT AN EMAIL THIS IS STILL A CALL — the plain conversation, no research, no plan. That
+   * WITHOUT AN INTAKE THIS IS STILL A CALL — the plain conversation, no research, no plan. That
    * path exists because it is the smallest thing that exercises the whole voice stack, and the
    * tests and the screenshot script both use it.
    */
   /** Which published agent to reach. Empty in the console, which gets tenant zero. */
   constructor(private readonly agentKey: string = "") {}
 
-  async connect(email?: string): Promise<void> {
+  async connect(who?: Intake): Promise<void> {
     if (this.socket) return;
     this.set({
       phase: "connecting",
       error: null,
       intakeError: null,
+      intakeField: null,
       turns: [],
       caption: "",
       handoff: false,
@@ -276,7 +383,11 @@ export class LiveCall {
 
     this.captionParts = [];
     socket.send(
-      JSON.stringify(email ? { type: "email", email } : { type: "start" }),
+      JSON.stringify(
+        who
+          ? { type: "intake", name: who.name, email: who.email, company: who.company }
+          : { type: "start" },
+      ),
     );
     this.set({ phase: "greeting" });
   }
@@ -323,7 +434,11 @@ export class LiveCall {
 
       case "intake_error":
         // Not a socket error. Someone mistyped their address and is watching a form.
-        this.set({ intakeError: String(message.spoken), phase: "idle" });
+        this.set({
+          intakeError: String(message.spoken),
+          intakeField: message.field ? String(message.field) : null,
+          phase: "idle",
+        });
         this.socket?.close();
         break;
 
@@ -418,6 +533,51 @@ export class LiveCall {
   }
 
   // ── the microphone ─────────────────────────────────────────────────────
+  /**
+   * Hands-free: the mic stays open and she is interrupted by talking, not by a button.
+   *
+   * HALF DUPLEX, AND THAT IS THE HONEST LIMIT. The browser's `SpeechRecognition` opens its own
+   * capture and gives no way to set `echoCancellation` on it, so with speakers and an open mic
+   * her own voice is transcribed and she answers herself. The mic is therefore CLOSED for
+   * exactly as long as she is speaking and reopened the moment she stops, which is the whole
+   * difference between this and holding a button: nothing to press, and the only thing you
+   * cannot do is talk over her.
+   *
+   * Full duplex — real barge-in — needs `getUserMedia` with echo cancellation and a
+   * transcriber that is not the Web Speech API. That is a different engine, not a flag.
+   */
+  setHandsFree(on: boolean): void {
+    this.wantsMic = on;
+    this.set({ handsFree: on });
+    if (on) this.openMic();
+    else this.closeMic();
+  }
+
+  /** Called whenever she starts or stops speaking, to keep the mic out of her way. */
+  private syncMic(): void {
+    if (!this.wantsMic) return;
+    if (this.state.speaking) this.closeMic();
+    else if (!this.recognition) this.openMic();
+  }
+
+  private closeMic(): void {
+    if (this.restart !== null) {
+      window.clearTimeout(this.restart);
+      this.restart = null;
+    }
+    const active = this.recognition;
+    this.recognition = null;
+    // `abort` rather than `stop`: `stop` finalises whatever it has heard, and what it has heard
+    // while she was talking is her.
+    active?.abort();
+    this.set({ listening: false, partial: "" });
+  }
+
+  private openMic(): void {
+    if (this.recognition || this.state.speaking) return;
+    this.startListening();
+  }
+
   startListening(): void {
     const Ctor = recognitionCtor();
     if (!Ctor || this.recognition) return;
@@ -446,7 +606,15 @@ export class LiveCall {
     };
 
     recognition.onerror = (event) => {
-      // `no-speech` and `aborted` are ordinary: the button was tapped, or held in silence.
+      // `no-speech` and `aborted` are ordinary: silence, or the mic being closed while she
+      // speaks. Neither is worth telling anybody about.
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        // Permission refused. Stop asking — a loop that reopens the mic every 250ms after a
+        // denial is how a page gets a permission prompt burned into it.
+        this.wantsMic = false;
+        this.set({ handsFree: false, error: "Microphone permission was refused." });
+        return;
+      }
       if (event.error && event.error !== "no-speech" && event.error !== "aborted") {
         this.set({
           error:
@@ -460,6 +628,12 @@ export class LiveCall {
     recognition.onend = () => {
       this.recognition = null;
       this.set({ listening: false });
+      // Chrome ends a recognition session after a few seconds of silence whatever
+      // `continuous` says, so hands-free is a loop rather than a setting. The small delay
+      // keeps a permission failure from becoming a busy loop.
+      if (this.wantsMic && !this.state.speaking) {
+        this.restart = window.setTimeout(() => this.openMic(), 250);
+      }
     };
 
     try {
@@ -625,6 +799,8 @@ export class LiveCall {
   }
 
   private mouthOn(text: string): void {
+    // She is about to be audible; the mic must not hear her.
+    if (this.wantsMic) this.closeMic();
     if (this.clipArrivedAt !== null) {
       this.avatarMs = performance.now() - this.clipArrivedAt;
       this.clipArrivedAt = null;
@@ -640,6 +816,8 @@ export class LiveCall {
 
   private mouthOff(): void {
     this.set({ speaking: false, phase: "listening" });
+    // Her turn is over, so the microphone is yours again.
+    this.syncMic();
   }
 
   private mouthOffIfLast(source: AudioBufferSourceNode): void {
@@ -682,16 +860,16 @@ export class LiveCall {
 
   // ── ending ─────────────────────────────────────────────────────────────
   hangUp(): void {
+    this.wantsMic = false;
     this.stopAudio();
-    this.recognition?.abort();
-    this.recognition = null;
+    this.closeMic();
     this.socket?.close();
     this.socket = null;
     void this.ctx?.close();
     this.ctx = null;
     this.analyser = null;
     this.levelBuffer = null;
-    this.set({ phase: "ended", listening: false, partial: "" });
+    this.set({ phase: "ended", listening: false, handsFree: false, partial: "" });
   }
 }
 

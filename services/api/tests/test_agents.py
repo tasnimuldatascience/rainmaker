@@ -282,10 +282,107 @@ class TestLivIsJustTheFirstRow:
         seed(store)
         assert store.versions(LIV_TENANT, LIV_AGENT) == [1]
 
+    def test_seeding_after_the_code_changed_publishes_the_change(self, store: AgentStore):
+        """IDEMPOTENT IS NOT INERT. Liv is defined in code, so a new tour stop or a priced tier
+        is a code change — and a seed that returned early whenever anything was live served
+        whatever had been seeded first. The tour was empty and the comparison step fell through
+        to the model, silently, on a database nobody thought to look at."""
+        from dataclasses import replace
+
+        from rainmaker.agents.store import liv_spec
+
+        stale = store.save(replace(liv_spec(), tour=(), competitors=()))
+        store.publish(stale.tenant, stale.agent_id, stale.version)
+
+        seeded = seed(store)
+        assert seeded.tour and seeded.competitors
+        assert store.versions(LIV_TENANT, LIV_AGENT) == [1, 2]
+        assert store.live(LIV_TENANT, LIV_AGENT).version == 2
+
+    def test_a_key_survives_the_agent_being_upgraded(self, store: AgentStore):
+        """The key is in a script tag on somebody's website. Reissuing it on every deploy would
+        take every embedded agent offline."""
+        from dataclasses import replace
+
+        from rainmaker.agents.store import liv_spec
+
+        stale = store.save(replace(liv_spec(), tour=()))
+        store.publish(stale.tenant, stale.agent_id, stale.version)
+        before = store.live(LIV_TENANT, LIV_AGENT).public_key
+        assert seed(store).public_key == before
+
     def test_she_knows_about_the_things_the_readme_claims(self):
+        """WHAT SHE SELLS IS WHAT THE PRODUCT DOES, not how it is built. An earlier version led
+        with "the console is offline-first", which is a true sentence about a CRDT and not a
+        reason anybody buys anything."""
         text = liv_spec().knowledge_text().lower()
-        for claim in ("offline-first", "crdt", "mcp", "ai before anything else"):
+        for claim in ("work email", "mcp", "ai before anything else", "at any hour"):
             assert claim in text, f"Liv cannot talk about {claim!r}"
+
+    def test_she_does_not_pitch_the_architecture(self):
+        text = liv_spec().knowledge_text().lower()
+        assert "offline-first" not in text
+        assert "crdt" not in text
+
+    def test_she_can_quote_and_take_payment(self):
+        """The funnel closes: a buyer ready at eleven at night should be able to finish."""
+        spec = liv_spec()
+        assert any(tier.unit_amount > 0 for tier in spec.pricing), "nothing is quotable"
+        assert "payments" in spec.tools
+        assert spec.tour and spec.competitors
+
+    def test_a_quote_speaks_the_tenants_unit_not_ours(self):
+        """The word "seat" was hard-coded into the sentence the agent reads out, which is how a
+        platform finds out it was shaped around its first customer. A GPU cloud sells hours."""
+        from rainmaker.agents.quoting import build_quote
+
+        spec = AgentSpec(
+            tenant="t", agent_id="a", currency="usd", pricing_period="month",
+            pricing=(
+                Tier("Reserved", "$2.40 / GPU-hour", "committed",
+                     unit_amount=240, min_seats=100, unit_name="GPU-hour"),
+            ),
+        )
+        spoken = build_quote(spec, said_seats=2_000).spoken()
+        assert "2,000 GPU-hours" in spoken
+        assert "per GPU-hour per month" in spoken
+        assert "seat" not in spoken
+
+    def test_the_seat_detector_listens_for_the_tenants_word(self):
+        """"We need about two thousand GPU hours" states the quantity. A detector that only
+        knows about headcount falls back to a guess on a sentence that told it the answer."""
+        from rainmaker.agents.quoting import seats_from_conversation, unit_words
+
+        spec = AgentSpec(
+            tenant="t", agent_id="a",
+            pricing=(Tier("Reserved", "$2.40", "", unit_amount=240, unit_name="GPU-hour"),),
+        )
+        words = unit_words(spec)
+        assert seats_from_conversation("we need about 2,000 GPU hours a month", words) == 2_000
+        assert seats_from_conversation("we closed forty deals last quarter", words) is None
+
+    def test_the_second_tenant_is_a_different_business_not_a_reskin(self):
+        """WHAT THE SECOND ROW IS FOR. A tenant that differs only in name and colour proves
+        nothing; this one sells hours instead of seats, to engineers instead of sales teams,
+        with its own tour and its own competitors — and is published through the same store."""
+        import importlib.util
+
+        root = Path(__file__).resolve().parents[3]
+        spec_file = importlib.util.spec_from_file_location(
+            "demo_embed", root / "scripts" / "demo-embed.py"
+        )
+        module = importlib.util.module_from_spec(spec_file)
+        spec_file.loader.exec_module(module)
+
+        theirs, ours = module.tessera(), liv_spec()
+        theirs.validate()
+
+        assert theirs.tenant != ours.tenant
+        assert {t.unit_name for t in theirs.pricing if t.unit_amount} == {"GPU-hour"}
+        assert theirs.tour and theirs.competitors
+        # Their allow-list is theirs: no email server, so the agent cannot reach for one.
+        assert "email" not in theirs.tools
+        assert theirs.guardrails.disclosure != ours.guardrails.disclosure
 
     def test_her_prices_are_configured_rather_than_compiled(self):
         """They were a module-level constant in `agenda.py`, which meant a second tenant's
@@ -294,7 +391,7 @@ class TestLivIsJustTheFirstRow:
 
     def test_she_is_granted_the_tools_her_call_actually_uses(self):
         granted = liv_spec().tools
-        for server in ("calendar", "crm", "research", "email"):
+        for server in ("calendar", "crm", "research", "email", "payments"):
             assert server in granted
 
 

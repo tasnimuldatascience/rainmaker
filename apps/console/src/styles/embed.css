@@ -71,6 +71,10 @@
   font: inherit; font-size: var(--t-sm); outline: none;
 }
 .w-input:focus { border-color: var(--accent); }
+/* `flex: 1` is for the composer bar, where the input sits beside a button. In the stacked
+   intake grid that same rule left the fields at their intrinsic width. */
+.w-start .w-input { inline-size: 100%; }
+.w-input[data-bad] { border-color: var(--lost, #c2410c); }
 .w-go, .w-send, .w-mic {
   border: 0; border-radius: var(--r-full); cursor: pointer; font: inherit; font-weight: 600;
 }
@@ -78,5 +82,6 @@
 .w-send { padding: 10px var(--s-3); background: var(--surface-3); color: var(--fg); font-size: var(--t-sm); }
 .w-send:disabled { opacity: 0.45; cursor: not-allowed; }
 .w-mic { padding: 10px var(--s-3); background: var(--surface-3); font-size: var(--t-md); touch-action: none; }
-.w-mic[data-on="true"] { background: color-mix(in oklab, var(--lost) 35%, transparent); }
+.w-mic[data-on="true"] { background: color-mix(in oklab, var(--won) 30%, transparent); }
+.w-mic[data-live="true"] { background: color-mix(in oklab, var(--lost) 40%, transparent); }
 .w-mic:disabled { opacity: 0.4; cursor: not-allowed; }

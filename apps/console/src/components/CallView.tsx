@@ -17,7 +17,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CallState, Panels, Step } from "../lib/call";
+import type { CallState, FrontDoor, Intake as IntakeFields, Panels, Step } from "../lib/call";
+import { frontDoor } from "../lib/call";
 import { LiveCall } from "../lib/call";
 import type { LocalStore } from "../lib/store";
 import { Portrait } from "./Portrait";
@@ -43,10 +44,11 @@ const STEPS: { id: Step; label: string }[] = [
   { id: "researching", label: "Reading their site" },
   { id: "opening", label: "Introducing" },
   { id: "discovery", label: "Understanding" },
-  { id: "showing", label: "Showing" },
-  { id: "proposing", label: "Proposing" },
-  { id: "booking", label: "Booking" },
-  { id: "pricing", label: "Pricing" },
+  { id: "guide", label: "Showing" },
+  { id: "compare", label: "Comparing" },
+  { id: "quote", label: "Quoting" },
+  { id: "close", label: "Closing" },
+  { id: "pay", label: "Checkout" },
   { id: "wrap", label: "Wrapping up" },
 ];
 
@@ -54,7 +56,18 @@ export function CallView({ store }: { store: LocalStore }) {
   const call = useMemo(() => new LiveCall(), []);
   const [state, setState] = useState<CallState | null>(null);
   const [draft, setDraft] = useState("");
-  const [email, setEmail] = useState("");
+  const [who, setWho] = useState<IntakeFields>({ name: "", email: "", company: "" });
+  const [door, setDoor] = useState<FrontDoor | null>(null);
+
+  // Asked once, before anything is drawn. The console always reaches tenant zero, so this is
+  // the same request the embed makes with a key in it.
+  useEffect(() => {
+    let live = true;
+    void frontDoor().then((found) => live && setDoor(found));
+    return () => {
+      live = false;
+    };
+  }, []);
   const transcriptEnd = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => call.subscribe(setState), [call]);
@@ -92,9 +105,9 @@ export function CallView({ store }: { store: LocalStore }) {
         <div>
           <h1>Live call</h1>
           <p>
-            She reads their website before she says a word, shows them their own pages while she
-            talks, books out of a real calendar, and stops selling the moment someone asks for a
-            person.
+            She reads their business before she says a word, drives the product on screen while
+            she talks, quotes a number computed from your pricing, takes payment, and books a
+            person only when the deal actually needs one.
           </p>
         </div>
       </div>
@@ -108,11 +121,19 @@ export function CallView({ store }: { store: LocalStore }) {
             <Stage panels={state.panels} active={state.active} onPick={(i) => call.pickSlot(i)} />
           ) : (
             <Intake
-              email={email}
-              setEmail={setEmail}
+              door={door}
+              who={who}
+              setWho={setWho}
               error={state.intakeError}
+              errorField={state.intakeField}
               connecting={state.phase === "connecting"}
-              onStart={() => void call.connect(email.trim() || undefined)}
+              onStart={() =>
+                void call.connect({
+                  name: who.name.trim(),
+                  email: who.email.trim(),
+                  company: who.company.trim(),
+                })
+              }
             />
           )}
 
@@ -140,18 +161,21 @@ export function CallView({ store }: { store: LocalStore }) {
                 <button
                   className="talk"
                   data-listening={state.listening}
+                  data-on={state.handsFree}
                   disabled={!state.micSupported}
                   title={
                     state.micSupported
-                      ? "Hold to talk. Chrome sends the audio to Google to transcribe it; typing stays on this machine."
+                      ? "Leave the microphone open. It closes while she speaks, because the browser gives no echo cancellation to speech recognition — so you cannot talk over her. Chrome sends the audio to Google; typing stays on this machine."
                       : "This browser has no speech recognition. Typing works everywhere."
                   }
-                  onPointerDown={() => call.startListening()}
-                  onPointerUp={() => call.stopListening()}
-                  onPointerLeave={() => state.listening && call.stopListening()}
+                  onClick={() => call.setHandsFree(!state.handsFree)}
                 >
                   {state.listening ? <i /> : "🎤"}
-                  {state.listening ? "Listening" : "Hold to talk"}
+                  {!state.handsFree
+                    ? "Talk to her"
+                    : state.listening
+                      ? "Listening"
+                      : "Mic on · she's speaking"}
                 </button>
               </div>
 
@@ -331,20 +355,38 @@ export function CallView({ store }: { store: LocalStore }) {
   );
 }
 
-/** The front door. One field, because one field is all she needs to know who you are. */
+/**
+ * The front door: name, work email, company.
+ *
+ * THREE FIELDS, WHICH IS TWO MORE THAN IT HAD. One field is a nicer form and a worse call — the
+ * name is how she greets you, the company is what she talks about, and the address is what she
+ * reads before she says a word. It is also the same thing a human rep asks in the first ten
+ * seconds, so nobody experiences it as a gate.
+ *
+ * THE ERROR GOES UNDER THE FIELD IT BELONGS TO, in the words the server chose, because the
+ * server is the thing that knows why and it phrased it as a sentence she could say out loud.
+ */
 function Intake({
-  email,
-  setEmail,
+  door,
+  who,
+  setWho,
   error,
+  errorField,
   connecting,
   onStart,
 }: {
-  email: string;
-  setEmail: (value: string) => void;
+  door: FrontDoor | null;
+  who: IntakeFields;
+  setWho: (value: IntakeFields) => void;
   error: string | null;
+  errorField: string | null;
   connecting: boolean;
   onStart: () => void;
 }) {
+  const enter = (e: React.KeyboardEvent) => e.key === "Enter" && onStart();
+  const bad = (field: string) => (error && errorField === field ? true : undefined);
+  const asks = (field: string) => !door || door.fields.includes(field);
+
   return (
     <div className="hero">
       <span className="pill">
@@ -355,20 +397,48 @@ function Intake({
         Meet <span>Liv</span>.
       </h2>
       <p>
-        The AI account executive that answers every buyer the moment they reach out. Give her your
-        work email and she&apos;ll read your site before she says a word. This call is the demo.
+        The AI account executive that answers every buyer the moment they land, at any hour, with
+        nobody to wait for. Tell her who you are and she&apos;ll read your business before she
+        says a word. This call is the demo.
       </p>
 
       <div className="intake">
-        <input
-          type="email"
-          value={email}
-          autoComplete="email"
-          placeholder="you@yourcompany.com"
-          aria-label="Your work email"
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onStart()}
-        />
+        <label className="field">
+          <span>Your name</span>
+          <input
+            value={who.name}
+            autoComplete="name"
+            placeholder="Dana Whitfield"
+            data-bad={bad("name")}
+            onChange={(e) => setWho({ ...who, name: e.target.value })}
+            onKeyDown={enter}
+          />
+        </label>
+        <label className="field">
+          <span>{door && !door.require_work_email ? "Email" : "Work email"}</span>
+          <input
+            type="email"
+            value={who.email}
+            autoComplete="email"
+            placeholder="dana@yourcompany.com"
+            data-bad={bad("email")}
+            onChange={(e) => setWho({ ...who, email: e.target.value })}
+            onKeyDown={enter}
+          />
+        </label>
+        {asks("company") && (
+          <label className="field">
+            <span>Company</span>
+            <input
+              value={who.company}
+              autoComplete="organization"
+              placeholder="Corvus Data"
+              data-bad={bad("company")}
+              onChange={(e) => setWho({ ...who, company: e.target.value })}
+              onKeyDown={enter}
+            />
+          </label>
+        )}
         <button className="btn" data-variant="primary" onClick={onStart} disabled={connecting}>
           {connecting ? "Connecting…" : "Start the call"}
         </button>
@@ -379,7 +449,9 @@ function Intake({
         </p>
       ) : (
         <p className="tiny muted" style={{ marginBlockStart: "var(--s-3)" }}>
-          Leave it blank for a plain conversation with no research.
+          {door && !door.require_work_email
+            ? "Nothing is shared with anyone else."
+            : "A work address, please — the domain is what she reads before the call starts."}
         </p>
       )}
     </div>
@@ -396,13 +468,25 @@ function StepRail({ step }: { step: Step | null }) {
           key={entry.id}
           className="rail-step"
           data-state={
-            step === "handoff" ? "idle" : i < index ? "done" : i === index ? "now" : "idle"
+            step === "handoff" || step === "booking"
+              ? i < index
+                ? "done"
+                : "idle"
+              : i < index
+                ? "done"
+                : i === index
+                  ? "now"
+                  : "idle"
           }
         >
           {entry.label}
         </span>
       ))}
-      {step === "handoff" && <span className="rail-step" data-state="now">Handing over</span>}
+      {(step === "handoff" || step === "booking") && (
+        <span className="rail-step" data-state="now">
+          {step === "booking" ? "Getting a person" : "Handing over"}
+        </span>
+      )}
     </div>
   );
 }
@@ -483,6 +567,100 @@ function Stage({
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (active === "comparison" && panels.comparison) {
+    return (
+      <div className="stage-card">
+        <h3>How she answers &ldquo;why you?&rdquo;</h3>
+        <p className="sub">
+          Every line here was written by the company that owns the agent. She is allowed to read
+          it and talk around it, and not to invent a word of it.
+        </p>
+        <div className="versus">
+          {panels.comparison.rivals.map((rival) => (
+            <div className="versus-row" key={rival.name}>
+              <div className="versus-head">
+                <b>{panels.comparison?.company}</b> vs <span>{rival.name}</span>
+                <p className="tiny muted">Good at: {rival.positioning}</p>
+              </div>
+              <ul className="fact-list">
+                {rival.against.map((line) => (
+                  <li key={line.dimension}>
+                    <span className="tag">{line.dimension}</span> {line.ours}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (active === "quote" && panels.quote) {
+    const quote = panels.quote;
+    return (
+      <div className="stage-card">
+        <h3>Your number{quote.company ? `, ${quote.company}` : ""}</h3>
+        <p className="sub">
+          {quote.assumed
+            ? "Sized from what she found about your business — tell her the real number and it updates."
+            : `Sized from the ${quote.units} you mentioned.`}
+        </p>
+        <div className="quote">
+          <div className="quote-total">
+            <span className="quote-figure">{quote.total_display}</span>
+            <span className="tiny muted">per {quote.period}</span>
+          </div>
+          <dl className="quote-lines">
+            <div>
+              <dt>Plan</dt>
+              <dd>{quote.tier}</dd>
+            </div>
+            <div>
+              <dt style={{ textTransform: "capitalize" }}>{quote.unit_plural}</dt>
+              <dd>{quote.seats.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Per {quote.unit_name}</dt>
+              <dd>{quote.unit_display}</dd>
+            </div>
+            {quote.discount_display && (
+              <div>
+                <dt>Annual saving</dt>
+                <dd>−{quote.discount_display}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+        <p className="tiny muted" style={{ marginBlockStart: "var(--s-3)" }}>
+          Every figure here is arithmetic on published pricing. The model never writes a number.
+        </p>
+      </div>
+    );
+  }
+
+  if (active === "checkout" && panels.checkout) {
+    const checkout = panels.checkout;
+    return (
+      <div className="stage-card stage-centred">
+        <h3>Ready when you are</h3>
+        <p style={{ fontSize: "var(--t-lg)" }}>
+          {checkout.amount_display}
+          {checkout.period ? ` per ${checkout.period}` : ""}
+          {checkout.description ? ` — ${checkout.description}` : ""}
+        </p>
+        <a className="btn" data-variant="primary" href={checkout.url} target="_blank" rel="noreferrer">
+          Open the checkout
+        </a>
+        <p className="tiny muted" style={{ marginBlockStart: "var(--s-3)" }}>
+          The card is entered on the payment provider&rsquo;s own page. She never sees it, and
+          neither does the transcript.
+          {checkout.test_mode && " This one is the local mock — no money moves."}
+        </p>
       </div>
     );
   }

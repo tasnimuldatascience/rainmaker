@@ -30,11 +30,19 @@ function railSteps(): string[] {
   return [...block.matchAll(/id: "([a-z_]+)"/g)].map((m) => m[1]!);
 }
 
+/**
+ * Steps that are real but are not stages of the plan.
+ *
+ * `booking` is the ESCALATION: the product's claim is that a buyer never waits for a rep, so a
+ * call that reaches the diary has left the funnel rather than advanced along it. Showing it as
+ * the pill after "checkout" would read as though every call is supposed to end there. CallView
+ * renders it separately, next to `handoff`.
+ */
+const NOT_ON_THE_RAIL = new Set(["handoff", "booking"]);
+
 describe("the call progress rail", () => {
   it("knows about every step the agenda can be in", () => {
-    // `handoff` is deliberately not a rail pill -- it is an ending, not a stage of the plan,
-    // and CallView renders it separately.
-    const expected = pythonSteps().filter((step) => step !== "handoff");
+    const expected = pythonSteps().filter((step) => !NOT_ON_THE_RAIL.has(step));
     expect(railSteps()).toEqual(expected);
   });
 

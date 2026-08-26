@@ -20,7 +20,8 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "r
 import { createRoot } from "react-dom/client";
 
 import { Portrait } from "./components/Portrait";
-import type { CallState } from "./lib/call";
+import type { CallState, FrontDoor, Intake } from "./lib/call";
+import { frontDoor } from "./lib/call";
 import { LiveCall } from "./lib/call";
 import "./styles/app.css";
 import "./styles/embed.css";
@@ -30,7 +31,19 @@ function Widget() {
   const call = useMemo(() => new LiveCall(key), [key]);
   const [state, setState] = useState<CallState | null>(null);
   const [draft, setDraft] = useState("");
-  const [email, setEmail] = useState("");
+  const [who, setWho] = useState<Intake>({ name: "", email: "", company: "" });
+  const [door, setDoor] = useState<FrontDoor | null>(null);
+
+  // WHOSE AGENT THIS IS, BEFORE THE FIRST FRAME. The widget is on somebody else's website, so
+  // the name in the header and the fields in the form both belong to them, and both are needed
+  // before a socket exists to carry them.
+  useEffect(() => {
+    let live = true;
+    void frontDoor(key).then((found) => live && setDoor(found));
+    return () => {
+      live = false;
+    };
+  }, [key]);
   const log = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => call.subscribe(setState), [call]);
@@ -38,6 +51,16 @@ function Widget() {
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
   }, [state?.turns.length]);
+
+  const start = useCallback(
+    () =>
+      void call.connect({
+        name: who.name.trim(),
+        email: who.email.trim(),
+        company: who.company.trim(),
+      }),
+    [call, who],
+  );
 
   const send = useCallback(() => {
     const text = draft.trim();
@@ -62,7 +85,10 @@ function Widget() {
       <header className="w-head">
         <span className="w-who">
           {live && <span className="w-dot" />}
-          {state.agent ? `${state.agent.name} · ${state.agent.company}` : "Talk to us"}
+          {(() => {
+            const who = state.agent ?? door;
+            return who?.name ? `${who.name} · ${who.company}` : "Talk to us";
+          })()}
         </span>
         <button
           className="w-x"
@@ -83,7 +109,7 @@ function Widget() {
           speaking={state.speaking}
           listening={live && !state.speaking}
           fill
-          src={state.agent?.portrait ?? "/agent/liv.jpg"}
+          src={state.agent?.portrait ?? door?.portrait ?? "/agent/liv.jpg"}
         />
         {state.caption && <div className="w-caption">{state.caption}</div>}
       </div>
@@ -93,18 +119,45 @@ function Widget() {
           <p className="w-lead">
             Ask us anything — you&apos;ll be talking to an AI assistant, and it will say so.
           </p>
+          {/* THE SAME THREE FIELDS AS THE CONSOLE, in a 380px box. Stacked, unlabelled and
+              placeholder-led, because a widget that opens with a form has about four seconds
+              before it is closed, and three short lines read faster than three labels. */}
+          <input
+            className="w-input"
+            value={who.name}
+            autoComplete="name"
+            placeholder="Your name"
+            aria-label="Your name"
+            data-bad={state.intakeField === "name" || undefined}
+            onChange={(e) => setWho({ ...who, name: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && start()}
+          />
           <input
             className="w-input"
             type="email"
-            value={email}
-            placeholder="Your work email (optional)"
+            value={who.email}
+            autoComplete="email"
+            placeholder={door && !door.require_work_email ? "Email" : "Work email"}
             aria-label="Your work email"
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void call.connect(email.trim() || undefined)}
+            data-bad={state.intakeField === "email" || undefined}
+            onChange={(e) => setWho({ ...who, email: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && start()}
           />
+          {(!door || door.ask_company) && (
+            <input
+              className="w-input"
+              value={who.company}
+              autoComplete="organization"
+              placeholder="Company"
+              aria-label="Your company"
+              data-bad={state.intakeField === "company" || undefined}
+              onChange={(e) => setWho({ ...who, company: e.target.value })}
+              onKeyDown={(e) => e.key === "Enter" && start()}
+            />
+          )}
           <button
             className="w-go"
-            onClick={() => void call.connect(email.trim() || undefined)}
+            onClick={start}
             disabled={state.phase === "connecting"}
           >
             {state.phase === "connecting" ? "Connecting…" : "Start the conversation"}
@@ -128,7 +181,7 @@ function Widget() {
             <input
               className="w-input"
               value={draft}
-              placeholder="Type, or hold the mic"
+              placeholder={state.handsFree ? "Listening — or type" : "Type, or tap the mic"}
               aria-label="Say something"
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && send()}
@@ -138,16 +191,17 @@ function Widget() {
             </button>
             <button
               className="w-mic"
-              data-on={state.listening}
+              data-on={state.handsFree}
+              data-live={state.listening}
               disabled={!state.micSupported}
               title={
                 state.micSupported
-                  ? "Hold to talk"
+                  ? state.handsFree
+                    ? "Turn the microphone off"
+                    : "Talk instead of typing"
                   : "This browser has no speech recognition — typing works"
               }
-              onPointerDown={() => call.startListening()}
-              onPointerUp={() => call.stopListening()}
-              onPointerLeave={() => state.listening && call.stopListening()}
+              onClick={() => call.setHandsFree(!state.handsFree)}
             >
               🎤
             </button>

@@ -26,11 +26,20 @@ import os
 import secrets
 import sqlite3
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .spec import AgentSpec, Fact, Guardrails, SpecError, Tier
+from .spec import (
+    AgentSpec,
+    Competitor,
+    Fact,
+    Guardrails,
+    SpecError,
+    Tier,
+    TourStop,
+)
 
 log = logging.getLogger("rainmaker.agents")
 
@@ -217,6 +226,14 @@ LIV_AGENT = "liv"
 
 
 def liv_spec() -> AgentSpec:
+    """Rainmaker's own agent, configured the way a customer configures theirs.
+
+    WHAT SHE SELLS IS THE AGENT ITSELF, which makes her the product demonstrating itself: a
+    buyer asking Liv how Rainmaker works is watching Rainmaker work. The knowledge below is
+    written as a salesperson would say it, not as documentation — the earlier version led with
+    "the console is offline-first", which is a true sentence about a CRDT and not a reason
+    anybody buys anything.
+    """
     return AgentSpec(
         tenant=LIV_TENANT,
         agent_id=LIV_AGENT,
@@ -225,97 +242,166 @@ def liv_spec() -> AgentSpec:
         company="Rainmaker",
         persona="a direct, well-prepared account executive who does not oversell",
         objective=(
-            "Understand what the prospect is trying to fix, and find out whether it is worth "
-            "putting a person on the next call."
+            "Work out whether an AI agent would actually help their sales team, show them how "
+            "it works on their own business, and either get them started or get them a time "
+            "with someone."
         ),
         voice="liv",
         portrait="/agent/liv.jpg",
         knowledge=(
             Fact(
-                text=(
-                    "Rainmaker is a sales platform with three parts: a research agent that reads "
-                    "a company's public website, an AI account executive that runs the first "
-                    "call, and a pipeline console for the reps."
-                ),
-                source="product overview",
+                "Rainmaker is an AI sales agent that talks to your buyers the moment they land "
+                "on your site, at any hour, with no waiting for a rep to be free.",
+                source="positioning",
             ),
             Fact(
-                text=(
-                    "The console is offline-first. Every edit is saved on the rep's own device "
-                    "immediately and synced afterwards, so it keeps working with no internet at "
-                    "all — on a train, in a basement, on a bad hotel connection."
-                ),
-                source="product overview",
-                topic="offline",
+                "It reads the buyer's company from their work email before it says a word, so "
+                "the conversation is about their business rather than a script.",
+                source="positioning",
             ),
             Fact(
-                text=(
-                    "Two reps editing the same deal while both offline end up in agreement "
-                    "automatically, because the data is a CRDT rather than a database row."
-                ),
-                source="architecture",
-                topic="offline",
+                "It runs the whole first call: understands what they need, walks them through "
+                "the product on screen, compares against what else they are looking at, quotes "
+                "them, and takes payment.",
+                source="positioning",
             ),
             Fact(
-                text=(
-                    "The language model, the voice and the research agent all run on the "
-                    "customer's own hardware, so recorded calls and pipeline data never leave "
-                    "it. There is no per-call cost and no third-party AI vendor in the contract."
-                ),
-                source="architecture",
-                topic="security",
+                "When a deal genuinely needs a person, it books one from a real calendar rather "
+                "than promising a callback.",
+                source="positioning",
             ),
             Fact(
-                text=(
-                    "The agent says it is an AI before anything else, and that cannot be "
-                    "switched off — not by us and not by the customer configuring it."
-                ),
-                source="guardrails",
-                topic="security",
+                "Most inbound buyers wait days for a first call. The ones who do not wait go "
+                "and talk to somebody else, which is the revenue this recovers.",
+                source="the problem",
+                topic="why",
             ),
             Fact(
-                text=(
-                    "Ask for a human and the agent stops selling immediately and hands over. "
-                    "The decision is made in code, not by the language model."
-                ),
-                source="guardrails",
-                topic="security",
+                "You configure your agent once: what it knows, what it may claim, what it "
+                "charges, and where it takes people on the demo. No engineering work.",
+                source="setup",
+                topic="setup",
             ),
             Fact(
-                text=(
-                    "Pricing depends on seats and on whether it runs in the customer's own "
-                    "environment. It is quoted by a person."
-                ),
-                source="pricing",
-                topic="pricing",
-            ),
-            Fact(
-                text=(
-                    "The agent connects to a customer's own calendar and CRM over MCP, so their "
-                    "existing systems are a configuration line rather than a Rainmaker release."
-                ),
+                "It connects to your own calendar, CRM and payment provider over MCP, so your "
+                "existing systems are a configuration line rather than a project.",
                 source="integrations",
                 topic="integrations",
             ),
+            Fact(
+                "The agent says it is an AI before anything else and that cannot be switched "
+                "off, by us or by you. Ask it for a human and it stops selling immediately.",
+                source="guardrails",
+                topic="security",
+            ),
+            Fact(
+                "It can only state facts you gave it. It is not allowed to invent a price, a "
+                "capability or a customer name, and every claim traces back to who wrote it.",
+                source="guardrails",
+                topic="security",
+            ),
+            Fact(
+                "The language model and the voice run on your own hardware if you want them "
+                "to, so recorded calls and pipeline data never leave your infrastructure.",
+                source="architecture",
+                topic="security",
+            ),
+        ),
+        tour=(
+            TourStop(
+                url="http://localhost:5173/demo/tessera.html",
+                label="an agent on a customer's site",
+                shows=(
+                    "a real customer's website with their own agent in the corner - their name, "
+                    "their voice, their prices, one script tag"
+                ),
+                scroll_to="Per GPU-hour",
+                answers=("how it works", "embed", "website", "install", "set up", "look like"),
+            ),
+            TourStop(
+                url="http://localhost:5173/",
+                label="the pipeline the calls write into",
+                shows=(
+                    "the deals board a rep works from, with the outcome and transcript of every "
+                    "agent call already on it"
+                ),
+                answers=("crm", "pipeline", "reps", "after the call", "handover", "team"),
+            ),
+        ),
+        competitors=(
+            Competitor(
+                name="a chat widget",
+                positioning="cheap, instant to install, and fine for answering a shipping question",
+                against=(
+                    ("what it does", "hold a real sales conversation rather than route a ticket"),
+                    ("preparation", "read the buyer's company before the first sentence"),
+                    ("outcome", "quote, take payment, or book a person"),
+                ),
+            ),
+            Competitor(
+                name="hiring another SDR",
+                positioning="judgement, relationships, and the ability to handle anything",
+                against=(
+                    ("availability", "answer at 2am and on a Sunday, with no queue"),
+                    ("ramp", "be live the day you configure it"),
+                    ("cost", "not scale with headcount"),
+                ),
+            ),
         ),
         pricing=(
-            Tier("Team", "$40 / seat / month", "up to 25 reps, hosted by us"),
-            Tier("Business", "$75 / seat / month", "SSO, your own environment"),
+            Tier(
+                "Team",
+                "$40 / seat / month",
+                "up to 25 reps, hosted by us",
+                unit_amount=4000,
+                min_seats=1,
+            ),
+            Tier(
+                "Business",
+                "$75 / seat / month",
+                "SSO, your own environment",
+                unit_amount=7500,
+                min_seats=20,
+            ),
             Tier("Enterprise", "quoted", "self-hosted, custom retention"),
         ),
-        pricing_note=(
-            "Sized from what her research found. Exact numbers come from a person — she is not "
-            "allowed to quote one."
-        ),
-        tools=("calendar", "crm", "research", "email"),
+        pricing_note="Sized from what she found about your business. Annual billing saves 15%.",
+        pricing_period="month",
+        currency="usd",
+        annual_discount_pct=15,
+        tools=("calendar", "crm", "research", "email", "payments"),
         guardrails=Guardrails(),
     )
 
 
 def seed(store: AgentStore) -> AgentSpec:
-    """Make sure tenant zero exists and is published. Idempotent."""
+    """Make sure tenant zero exists and is published, and matches the code.
+
+    IDEMPOTENT, BUT NOT INERT, and the difference cost a whole debugging session. Liv is defined
+    in `liv_spec()` rather than in a builder, so a change to her — a new tour stop, a competitor,
+    a price with an amount on it — is a code change. A seed that returned early whenever any
+    version was live meant the running agent was whatever had been seeded first: the tour was
+    empty and the comparison step fell through to the model, silently, on a database nobody
+    thought to look at.
+
+    A tenant's own agent is the opposite case and is left alone: their versions are theirs, and
+    nothing here writes one.
+    """
     existing = store.live(LIV_TENANT, LIV_AGENT)
-    if existing is not None:
+    wanted = liv_spec()
+    if existing is not None and _same_agent(existing, wanted):
         return existing
-    saved = store.save(liv_spec())
+
+    # A new version rather than an edit of the live one: publishing is a pointer move, so an
+    # upgrade cannot alter an agent underneath somebody who is mid-conversation with it.
+    versions = store.versions(LIV_TENANT, LIV_AGENT)
+    saved = store.save(replace(wanted, version=max(versions) + 1 if versions else wanted.version))
     return store.publish(saved.tenant, saved.agent_id, saved.version)
+
+
+def _same_agent(live: AgentSpec, wanted: AgentSpec) -> bool:
+    """Whether two specs say the same thing, ignoring what versioning adds."""
+    ignore = {"version", "public_key", "published", "created_at", "updated_at"}
+    return {k: v for k, v in live.as_dict().items() if k not in ignore} == {
+        k: v for k, v in wanted.as_dict().items() if k not in ignore
+    }

@@ -114,6 +114,10 @@ def default_servers() -> list[ServerSpec]:
         # part that is actually interesting, and the part a demo can show — had never once run.
         # Only sending needs an account, and only sending is gated.
         ServerSpec("email", python, ["-m", "rainmaker.mcp.servers.email"]),
+        # Mock by default, real behind STRIPE_SECRET_KEY. Shipped on rather than gated for the
+        # same reason as email: the interesting half - building a checkout from a computed quote
+        # - needs no account, and only moving actual money does.
+        ServerSpec("payments", python, ["-m", "rainmaker.mcp.servers.payments"]),
     ]
 
 

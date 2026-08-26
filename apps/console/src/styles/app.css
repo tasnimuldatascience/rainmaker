@@ -345,7 +345,13 @@
   }
   @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
 
-  .hero { max-inline-size: 34ch; align-self: center; }
+  /* THE MEASURE BELONGS TO THE PROSE, NOT THE PANEL. Capping `.hero` itself at a readable
+     line length also caps everything inside it, so a three-field form laid out with
+     `auto-fit` had 42ch to work with and collapsed to one column on a 1400px screen. The
+     block is wide; the sentences inside it are not. */
+  .hero { max-inline-size: 52rem; align-self: center; }
+  .hero h2, .hero > p { max-inline-size: 42ch; }
+  .hero > p.tiny { max-inline-size: 60ch; }
   .hero h2 {
     font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
     font-size: clamp(2.25rem, 4.4vw, 3.5rem); line-height: 1.04; letter-spacing: -0.02em;
@@ -430,6 +436,9 @@
   }
   .talk:hover:not(:disabled) { background: var(--surface-4); }
   .talk:disabled { opacity: 0.45; cursor: not-allowed; }
+  .talk[data-on="true"] {
+    background: color-mix(in oklab, var(--won) 18%, transparent); border-color: var(--won);
+  }
   .talk[data-listening="true"] {
     background: color-mix(in oklab, var(--lost) 20%, transparent);
     border-color: var(--lost); color: var(--fg); transform: scale(0.98);
@@ -459,14 +468,81 @@
     border-color: color-mix(in oklab, var(--accent) 45%, transparent);
   }
 
-  .intake { display: flex; gap: var(--s-2); margin-block-start: var(--s-5); max-inline-size: 30rem; }
-  .intake input {
-    flex: 1; padding: 11px var(--s-4); border-radius: var(--r-full);
-    background: var(--surface-1); border: 1px solid var(--line-strong); color: var(--fg);
-    font: inherit; font-size: var(--t-md); outline: none; transition: border-color var(--fast);
+  /* THE INTAKE ESCAPES THE HERO'S MEASURE. `.hero` is capped at 34ch because that is a
+     readable line length for the headline; applying it to a form squeezed the field to a
+     stub and wrapped "Start the call" onto three lines. Prose wants a measure. A form wants
+     room. */
+  /* THREE FIELDS ON ONE LINE UNTIL THEY DO NOT FIT, then two, then one. `auto-fit` with a
+     14rem floor rather than three fixed columns: a fixed grid is what produced the squashed
+     row where "dana@yourcompany.com" rendered as "dana@yourc…". The button takes the full
+     width once the fields have stacked, because a lone pill next to nothing looks broken. */
+  .intake {
+    display: grid; gap: var(--s-3); margin-block-start: var(--s-5);
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    inline-size: min(52rem, 100%); max-inline-size: none; align-items: end;
   }
-  .intake input:focus { border-color: var(--accent); }
+  /* Full width once the fields have stacked: a lone pill next to nothing looks broken. */
+  .intake .btn { white-space: nowrap; block-size: 44px; grid-column: 1 / -1; justify-self: start;
+    padding-inline: var(--s-6); }
+  .field { display: grid; gap: 6px; min-inline-size: 0; }
+  .field > span {
+    font-size: var(--t-xs); font-weight: 600; color: var(--fg-3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .intake input {
+    inline-size: 100%; min-inline-size: 0; block-size: 44px; padding: 0 var(--s-4);
+    border-radius: var(--r-full);
+    background: var(--surface-1); border: 1px solid var(--line-strong); color: var(--fg);
+    font: inherit; font-size: var(--t-md); outline: none;
+    transition: border-color var(--fast), box-shadow var(--fast);
+  }
+  .intake input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+  }
+  .intake input[data-bad] { border-color: var(--lost); }
   .intake input::placeholder { color: var(--fg-4); }
+
+  /* THE COMPARISON. Their claims, in their words, laid out so the model has nothing to add. */
+  .versus { display: grid; gap: var(--s-4); margin-block-start: var(--s-4); }
+  .versus-row {
+    padding: var(--s-4); border: 1px solid var(--line); border-radius: var(--r-md);
+    background: var(--surface-1);
+  }
+  .versus-head b { color: var(--accent); }
+  .versus-head span { color: var(--fg-2); }
+  .versus-head p { margin-block-start: 2px; }
+  .versus-row .fact-list { margin-block-start: var(--s-3); }
+  /* The dimension gets its own column. Inline, the tag pushed the first line of the claim
+     across and the rest of it wrapped back underneath, which reads as two separate thoughts. */
+  .versus-row .fact-list li {
+    display: grid; grid-template-columns: minmax(5.5rem, auto) 1fr;
+    gap: var(--s-3); align-items: baseline;
+  }
+  .versus-row .tag { justify-self: start; }
+
+  /* THE QUOTE. One number the size of a headline, and the arithmetic under it, because a
+     figure a buyer cannot check is a figure a buyer does not agree to. */
+  .quote {
+    display: grid; gap: var(--s-4); margin-block-start: var(--s-4); padding: var(--s-5);
+    border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--line));
+    border-radius: var(--r-md); background: var(--accent-wash);
+  }
+  .quote-total { display: grid; gap: 2px; }
+  .quote-figure {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: clamp(2.5rem, 6vw, 3.75rem); line-height: 1; letter-spacing: -0.02em;
+    color: var(--fg);
+  }
+  .quote-lines { display: grid; gap: var(--s-2); }
+  .quote-lines > div {
+    display: flex; justify-content: space-between; gap: var(--s-3);
+    padding-block-end: var(--s-2); border-block-end: 1px dashed var(--line);
+    font-size: var(--t-sm);
+  }
+  .quote-lines > div:last-child { border-block-end: none; padding-block-end: 0; }
+  .quote-lines dt { color: var(--fg-3); }
+  .quote-lines dd { color: var(--fg); font-weight: 620; font-variant-numeric: tabular-nums; }
 
   /* A browser window, because the prospect has to believe she is really opening their site. */
   .screen {

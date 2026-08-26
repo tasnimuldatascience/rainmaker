@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
+from ..agents.quoting import build_quote, seats_from_conversation, unit_words
 from .intake import Contact
 from .pipeline import Finished, LatencyBudget, Spoke, TurnEvent, TurnResult, _wants_human
 from .session import CallSession, Prospect, clean_company_name, facts_from_enrichment
@@ -84,17 +85,25 @@ class Tools(Protocol):
 
 
 class Step(StrEnum):
-    """Where the call is. Order is the happy path; jumps are allowed and normal."""
+    """Where the call is. Order is the happy path; jumps are allowed and normal.
+
+    THIS IS A CLOSING FUNNEL, NOT A LEAD-GEN ONE, and that is a recent correction. The steps
+    used to end at "book a meeting", which optimises for calendar slots. The agent exists so a
+    buyer can talk at any hour without waiting for a rep, and a buyer who is ready at eleven at
+    night should be able to finish — understand it, compare it, see their number, and pay.
+    Booking a human is the ESCALATION now, not the goal.
+    """
 
     RESEARCHING = "researching"
     OPENING = "opening"
     DISCOVERY = "discovery"
-    SHOWING = "showing"
-    PROPOSING = "proposing"
+    GUIDE = "guide"
+    COMPARE = "compare"
+    QUOTE = "quote"
+    CLOSE = "close"
+    PAY = "pay"
     BOOKING = "booking"
-    PRICING = "pricing"
     WRAP = "wrap"
-    HANDOFF = "handoff"
 
 
 # ───────────────────────────────────────────────────────────── what the console shows
@@ -127,19 +136,45 @@ AgendaEvent = TurnEvent | Panel | Phase
 #: model is consulted, because these are the moments where guessing is expensive.
 _INTENTS: tuple[tuple[Step, re.Pattern[str]], ...] = (
     (
-        Step.PRICING,
-        re.compile(r"\b(how much|what.{0,12}cost|price|pricing|budget|per seat|quote)\b", re.I),
-    ),
-    (
         Step.BOOKING,
         re.compile(
-            r"\b(book|schedule|set (?:up|something)|calendar|meeting|call next|when can we)\b",
+            r"\b(?:talk|speak) to (?:a |an )?(?:human|person|real|someone|sales)"
+            r"|\b(?:book|schedule|set up|arrange)\b.{0,20}"
+            r"\b(?:call|meeting|demo|time|chat|something|slot|session)\b"
+            r"|\bwhen can (?:we|i) (?:speak|talk|meet)\b",
             re.I,
         ),
     ),
     (
-        Step.SHOWING,
-        re.compile(r"\b(show me|can I see|what does it look like|demo)\b", re.I),
+        Step.PAY,
+        re.compile(
+            r"\b(?:i'?ll take it|sign me up|sign up|let'?s do it|i'?m in|take my money"
+            r"|how do i (?:buy|pay|start)|can i (?:buy|pay|start)|get started|check ?out)\b",
+            re.I,
+        ),
+    ),
+    (
+        Step.COMPARE,
+        re.compile(
+            r"\b(?:compare[ds]?|comparison|versus|vs\.?|instead of|better than|difference"
+            r"|what makes you|why (?:you|not|switch)|alternativ\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        Step.QUOTE,
+        re.compile(
+            r"\b(?:how much|what.{0,12}cost|price|pricing|budget|per seat|quote|afford)\b",
+            re.I,
+        ),
+    ),
+    (
+        Step.GUIDE,
+        re.compile(
+            r"\b(?:show me|can i see|what does it look like|demo|walk me through"
+            r"|how does it work|how do(?:es)? (?:it|you) work)\b",
+            re.I,
+        ),
     ),
 )
 
@@ -195,45 +230,64 @@ PLAN: dict[Step, StepPlan] = {
     ),
     Step.DISCOVERY: StepPlan(
         objective=(
-            "Find out how their inbound sales calls are handled today and what is painful "
-            "about it. One question at a time. Do not describe the product yet."
+            "Find out what they are trying to fix and how big their team is. One question at a "
+            "time. Do not describe the product yet."
         ),
         max_turns=3,
-        next_step=Step.SHOWING,
-        transitions=(Step.SHOWING, Step.PRICING, Step.BOOKING),
+        next_step=Step.GUIDE,
+        transitions=(Step.GUIDE, Step.QUOTE, Step.COMPARE),
     ),
-    Step.SHOWING: StepPlan(
+    Step.GUIDE: StepPlan(
         objective=(
-            "You are looking at one of their own pages. Say what you see on it and what an "
-            "agent would do with it on a real inbound call. Be concrete about THEIR page."
+            "You are showing them the product on screen. Say what is on this page and what it "
+            "would do for the problem they described. Concrete, not a feature list."
         ),
-        max_turns=3,
-        next_step=Step.PROPOSING,
-        transitions=(Step.PROPOSING, Step.PRICING, Step.BOOKING),
+        max_turns=4,
+        next_step=Step.QUOTE,
+        transitions=(Step.COMPARE, Step.QUOTE, Step.CLOSE),
     ),
-    Step.PROPOSING: StepPlan(
+    Step.COMPARE: StepPlan(
         objective=(
-            "Make the case in two sentences: what this replaces for them specifically, and "
-            "what it costs them to keep doing it by hand. Then offer to put time in the diary."
+            "The comparison is on screen. Be fair about what the alternative is good at, then "
+            "say plainly where you differ. Never rubbish a competitor."
         ),
         max_turns=2,
-        next_step=Step.BOOKING,
-        transitions=(Step.BOOKING, Step.PRICING),
+        next_step=Step.QUOTE,
+        transitions=(Step.QUOTE, Step.CLOSE, Step.GUIDE),
     ),
-    Step.BOOKING: StepPlan(
-        objective="Get one of the offered times agreed. Do not invent times.",
-        max_turns=3,
-        next_step=Step.PRICING,
-        transitions=(Step.PRICING,),
-    ),
-    Step.PRICING: StepPlan(
+    Step.QUOTE: StepPlan(
         objective=(
-            "Talk about price honestly: it depends on seats and where it runs, and a person "
-            "quotes it. Never state a figure."
+            "Their number is on screen and you have just said it. Do not repeat the figure. "
+            "Ask whether it works for them."
+        ),
+        max_turns=2,
+        next_step=Step.CLOSE,
+        transitions=(Step.CLOSE, Step.COMPARE, Step.BOOKING),
+    ),
+    Step.CLOSE: StepPlan(
+        objective=(
+            "Ask for the business, once and plainly. If they raise an objection, answer it in "
+            "one sentence and ask again. If they need someone internally, offer a time with a "
+            "person instead."
+        ),
+        max_turns=3,
+        next_step=Step.WRAP,
+        transitions=(Step.PAY, Step.BOOKING, Step.COMPARE),
+    ),
+    Step.PAY: StepPlan(
+        objective=(
+            "Checkout is on screen. Tell them it is there and that they can finish it now. Do "
+            "not state the amount again and never ask for card details."
         ),
         max_turns=2,
         next_step=Step.WRAP,
         transitions=(Step.WRAP, Step.BOOKING),
+    ),
+    Step.BOOKING: StepPlan(
+        objective="Get one of the offered times agreed. Do not invent times.",
+        max_turns=3,
+        next_step=Step.WRAP,
+        transitions=(Step.WRAP,),
     ),
     Step.WRAP: StepPlan(
         objective="Close warmly in one sentence and say what happens next.",
@@ -259,13 +313,21 @@ class Agenda:
         self.deal_id = f"d-{contact.domain.split('.')[0]}" if contact.domain else "d-inbound"
 
         #: Pages found on their site that are worth putting on screen, and which have been.
-        self.pages: list[dict[str, str]] = []
         self.shown: set[str] = set()
         #: The slots most recently offered, so "the first one" means something.
         self.offered: list[dict[str, str]] = []
         self.booking: dict[str, Any] | None = None
         self.enrichment: dict[str, Any] = {}
         self.transcript_lines: list[str] = []
+        #: Seats the buyer stated, which beats anything research guessed. "We've got forty reps"
+        #: is not small talk, it is the number on the quote.
+        self.said_seats: int | None = None
+        self.quote: Any = None
+        self.checkout: dict[str, Any] | None = None
+        #: True once they have asked for a person, so the booking step says the handoff line.
+        self.wants_human = False
+        #: True once the call has been written down. See `end`.
+        self.closed = False
 
         #: True once the disclosure has actually been delivered.
         self.opened = False
@@ -359,6 +421,32 @@ class Agenda:
         ):
             yield event
 
+        # THE BROWSING IS THE DEMO, SO IT HAS TO BE VISIBLE WHILE IT HAPPENS. Enrichment is one
+        # tool call that reads half a dozen pages and returns at the end, so for the fifteen
+        # seconds that takes the stage showed nothing at all — the prospect was told she was
+        # looking at their site and given an empty box to look at. Their homepage goes up first,
+        # in two or three seconds, so "she is on your website" is something you can see rather
+        # than something you are asked to believe.
+        home = f"https://{self.contact.domain}/"
+        yield Panel("browser", {"state": "opening", "url": home, "label": "home"})
+        try:
+            looked = await self.tools.call(
+                "research.browse", {"url": home, "screenshot": True}
+            )
+            self.shown.add(looked.get("url", home))
+            yield Panel(
+                "browser",
+                {
+                    "state": "open",
+                    "url": looked.get("url", home),
+                    "title": looked.get("title", ""),
+                    "label": "reading",
+                    "frame": looked.get("frame_jpeg_base64", ""),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — a slow homepage is not a failed call
+            log.info("could not open %s: %s", home, exc)
+
         try:
             self.enrichment = await self.tools.call(
                 "research.research_company", {"domain": self.contact.domain, "max_pages": 6}
@@ -387,14 +475,6 @@ class Agenda:
             },
         )
 
-        try:
-            found = await self.tools.call(
-                "research.pages_worth_showing", {"domain": self.contact.domain}
-            )
-            self.pages = found.get("pages", [])
-        except Exception as exc:  # noqa: BLE001
-            log.info("page discovery failed: %s", exc)
-
     # ── a turn ──────────────────────────────────────────────────────────
     async def respond(
         self, text: str, *, budget_hints: dict[str, float] | None = None
@@ -411,19 +491,32 @@ class Agenda:
             return
         self.transcript_lines.append(f"Prospect: {text}")
 
+        # NOBODY IS IN THE ROOM, so asking for a person cannot mean a transfer. It means a time
+        # with one. The fixed line is still said first and the model is still never consulted
+        # about whether to agree; what follows it is a diary rather than a promise.
         if _wants_human(text):
-            self.step = Step.HANDOFF
-            yield Phase(Step.HANDOFF, "asked for a person")
-            async for event in self.session.respond(text, budget_hints=budget_hints):
-                yield event
-            async for event in self._close_out("handed_off"):
+            self.wants_human = True
+            async for event in self._enter(Step.BOOKING, said=text):
                 yield event
             return
 
+        # Anything they said about team size feeds the quote later. Read on every turn, because
+        # it is usually mentioned in passing during discovery rather than in answer to a
+        # question about seats.
+        spec = self.session.spec
+        stated = seats_from_conversation(text, unit_words(spec) if spec else ())
+        if stated is not None:
+            self.said_seats = stated
+
         # An explicit ask outranks the plan. Someone who asks the price during discovery is
         # telling you what the call is about now.
+        #
+        # GUIDE RE-ENTERS ITSELF, and the others do not. "Show me another" while already on the
+        # tour means the NEXT stop, and a step that only runs on arrival would have answered it
+        # by talking about the page already on screen. Asking the price twice, by contrast,
+        # should not rebuild the same quote — the model answers that.
         wanted = detect_intent(text)
-        if wanted and wanted is not self.step:
+        if wanted and (wanted is not self.step or wanted is Step.GUIDE):
             async for event in self._enter(wanted, said=text):
                 yield event
             return
@@ -462,16 +555,28 @@ class Agenda:
             async for event in self._open():
                 yield event
             return
-        if step is Step.SHOWING:
-            async for event in self._show(said):
+        if step is Step.GUIDE:
+            async for event in self._guide(said):
+                yield event
+            return
+        if step is Step.COMPARE:
+            async for event in self._compare(said):
+                yield event
+            return
+        if step is Step.QUOTE:
+            async for event in self._quote(said):
+                yield event
+            return
+        if step is Step.CLOSE:
+            async for event in self._close(said):
+                yield event
+            return
+        if step is Step.PAY:
+            async for event in self._pay(said):
                 yield event
             return
         if step is Step.BOOKING:
             async for event in self._offer_times(said):
-                yield event
-            return
-        if step is Step.PRICING:
-            async for event in self._price(said):
                 yield event
             return
         if step is Step.WRAP:
@@ -479,7 +584,7 @@ class Agenda:
                 yield event
             return
 
-        # Discovery and proposing are pure conversation: retarget the model and let it talk.
+        # Discovery is pure conversation: retarget the model and let it talk.
         async for event in self._speak(said or "(continue)"):
             yield event
 
@@ -535,9 +640,14 @@ class Agenda:
     # ── the steps that do something ─────────────────────────────────────
     async def _open(self) -> AsyncIterator[AgendaEvent]:
         """A greeting that proves she read their site. The disclosure already happened."""
-        if not self.contact.researchable:
+        who = self.contact.first_name or "them"
+        if not self.session.prospect.facts:
+            # The form gave her a name and a company; research found nothing to add. Better to
+            # greet with what she has than to imply she looked them up.
             async for event in self._speak(
-                "(Greet them, and ask which company they are with — you could not look it up.)"
+                f"(Greet {who} by name and ask what prompted them to look at this. You could "
+                f"not read anything about {self.contact.company_guess or 'their company'}, so "
+                f"do not pretend you did.)"
             ):
                 yield event
             return
@@ -550,39 +660,56 @@ class Agenda:
             (f for f in facts if f.startswith(("Technology", "Currently hiring", "Buying signal"))),
             next((f for f in facts if f.startswith("What they do")), ""),
         )
-        who = self.contact.first_name or "them"
         async for event in self._speak(
             f"(Greet {who} by name, mention this specific thing you found — {hook or 'their site'}"
             " — and ask what prompted them to look at this.)"
         ):
             yield event
 
-    async def _show(self, said: str) -> AsyncIterator[AgendaEvent]:
-        """Open one of their pages on the stage and narrate it.
+    def _next_stop(self, said: str) -> Any:
+        """Where to take them next on the product tour.
 
-        One page per visit. A slideshow of six tabs is a screen share nobody follows.
+        Goes where the QUESTION went. A stop declares what it answers, so "does it work
+        offline" lands on the page that shows that rather than on stop three of five. A tour
+        that always runs in order is a slide deck with extra steps.
         """
-        page = next((p for p in self.pages if p["url"] not in self.shown), None)
-        if page is None:
-            async for event in self._speak(said or "(continue)"):
+        spec = self.session.spec
+        stops = [s for s in (spec.tour if spec else ()) if s.url not in self.shown]
+        if not stops:
+            return None
+        lowered = said.lower()
+        wanted = [
+            s for s in stops if any(topic.lower() in lowered for topic in s.answers if topic)
+        ]
+        return (wanted or stops)[0]
+
+    async def _guide(self, said: str) -> AsyncIterator[AgendaEvent]:
+        """Drive the SELLER's product on screen and talk over it.
+
+        THE OPPOSITE DIRECTION FROM RESEARCH, and the distinction is the whole demo. Research
+        opens the BUYER's website to work out who they are. This opens OUR product to show them
+        what they would be buying. For a while this code did the first and called it the second,
+        so the demo consisted of narrating the prospect's own homepage back at them.
+        """
+        stop = self._next_stop(said)
+        if stop is None:
+            # No tour configured, or every stop has been shown. Talk from knowledge rather than
+            # opening a page nobody chose.
+            async for event in self._speak(
+                said or "(Describe what the product would do for the problem they described.)"
+            ):
                 yield event
             return
 
-        self.shown.add(page["url"])
-        yield Panel("browser", {"state": "opening", "url": page["url"], "label": page["label"]})
-
-        # SCROLL TO THE THING SHE IS ABOUT TO TALK ABOUT. `browse` has taken a `scroll_to` since
-        # it was written and nothing ever passed one, so every page opened at the top and she
-        # narrated a viewport the prospect had to scroll past to check. A screen share that does
-        # not go to the point is a screen share of a homepage.
-        target = self._scroll_target(page["label"])
+        self.shown.add(stop.url)
+        yield Panel("browser", {"state": "opening", "url": stop.url, "label": stop.label})
         try:
             looked = await self.tools.call(
                 "research.browse",
-                {"url": page["url"], "screenshot": True, "scroll_to": target},
+                {"url": stop.url, "screenshot": True, "scroll_to": stop.scroll_to},
             )
-        except Exception as exc:  # noqa: BLE001
-            log.info("could not open %s: %s", page["url"], exc)
+        except Exception as exc:  # noqa: BLE001 - a page that will not load is not a dead call
+            log.info("could not open %s: %s", stop.url, exc)
             async for event in self._speak(said or "(continue)"):
                 yield event
             return
@@ -591,55 +718,203 @@ class Agenda:
             "browser",
             {
                 "state": "open",
-                "url": looked.get("url", page["url"]),
+                "url": looked.get("url", stop.url),
                 "title": looked.get("title", ""),
-                "label": page["label"],
+                "label": stop.label,
                 "frame": looked.get("frame_jpeg_base64", ""),
                 "scrolled_to": looked.get("scrolled_to", ""),
             },
         )
-        # The model is handed what is ON SCREEN, so the narration and the picture agree. Given
-        # only the URL it would describe a page it has not seen.
-        excerpt = (looked.get("text") or "")[:900]
-        company = self.session.prospect.company or self.contact.company_guess or "their company"
-        # WHOSE PAGE IT IS HAS TO BE SPELLED OUT. Given "you are showing them their own pricing
-        # page", the model said "you might have stumbled upon OUR pricing page" — claiming
-        # Stripe's page as Rainmaker's, to someone who works at Stripe. Naming the company and
-        # saying it twice is cheap; being corrected on whose website you are looking at is not.
+        excerpt = (looked.get("text") or "")[:700]
+        ours = self.session.spec.company if self.session.spec else "your company"
+        theirs = self.session.prospect.company or self.contact.company_guess or "their company"
         async for event in self._speak(
-            f"(You are screen-sharing {company}'s OWN {page['label']} page — it belongs to the "
-            f"person you are speaking to, not to Rainmaker. Never call it 'our' page. Say what "
-            f"you notice on {company}'s page and what an AI agent would do with it on a real "
-            f"inbound call. The page says: {excerpt})"
+            f"(You are screen-sharing {ours}'s OWN product with them: {stop.label}. "
+            f"It shows: {stop.shows}. The page reads: {excerpt} "
+            f"This page belongs to {ours}, not to {theirs} — it is what they would be buying. "
+            f"Say what is on the screen and what it would do about the problem they described. "
+            f"Do not read the page out.)"
         ):
             yield event
 
-    def _scroll_target(self, label: str) -> str:
-        """A phrase on this page worth putting in the middle of the screen.
+    async def _compare(self, said: str) -> AsyncIterator[AgendaEvent]:
+        """Put the comparison on screen, then be fair about it.
 
-        Taken from what research already found rather than guessed at, so the phrase is one the
-        page demonstrably contains. `browse` treats a phrase it cannot find as no scroll at all,
-        so a miss costs nothing and a hit puts the evidence where she is pointing.
+        EVERY LINE IS THE TENANT'S, QUOTED VERBATIM. A comparison table a language model wrote
+        about a named competitor is a defamation risk with a grid layout, so the model is given
+        the table and told to talk around it rather than asked to produce one.
         """
-        if label == "careers":
-            roles = [f for f in self.session.prospect.facts if f.startswith("Currently hiring")]
-            if roles:
-                # "Currently hiring (2 open roles): Data Engineer, ..." -> "Data Engineer"
-                return roles[0].split(":", 1)[-1].split(",")[0].strip()
-        if label == "pricing":
-            return "pricing"
-        tech = [f for f in self.session.prospect.facts if f.startswith("Technology on their site")]
-        if tech:
-            return tech[0].split(":", 1)[-1].split(",")[0].strip()
-        return ""
+        spec = self.session.spec
+        rivals = list(spec.competitors) if spec else []
+        if not rivals:
+            async for event in self._speak(
+                said or "(They asked how you compare. You have no comparison configured, so "
+                "answer from what the product does and offer to have someone follow up.)"
+            ):
+                yield event
+            return
+
+        lowered = said.lower()
+        named = [r for r in rivals if r.name.lower() in lowered]
+        shown = named or rivals
+
+        yield Panel(
+            "comparison",
+            {
+                "company": spec.company,
+                "rivals": [
+                    {
+                        "name": r.name,
+                        "positioning": r.positioning,
+                        "against": [{"dimension": d, "ours": o} for d, o in r.against],
+                    }
+                    for r in shown
+                ],
+            },
+        )
+        table = " | ".join(
+            f"{r.name}: they are good at {r.positioning}; "
+            + "; ".join(f"on {d} we {o}" for d, o in r.against)
+            for r in shown
+        )
+        async for event in self._speak(
+            f"(The comparison is on their screen: {table} "
+            f"Be fair about what they are good at first, then say plainly where you differ. "
+            f"Never rubbish them, and never claim anything not in that table.)"
+        ):
+            yield event
+
+    async def _quote(self, said: str) -> AsyncIterator[AgendaEvent]:
+        """Their number, computed here and spoken by the platform.
+
+        THE FIGURE IS NOT THE MODEL'S. Seats, rate, discount and total are arithmetic over the
+        tenant's published pricing, and the sentence that states them is written by `Quote`, the
+        way the calendar writes its own times. The model is then told the number is already said
+        and asked to do the only part it is good at: ask whether it works.
+
+        `Guardrails.speak_prices` stays false and still means what it meant — the MODEL may not
+        state a figure. The platform saying its own computed total is a different act, and it is
+        the one that lets a call end in a sale instead of a follow-up.
+        """
+        spec = self.session.spec
+        if spec is None:
+            return
+
+        band = ((self.enrichment.get("size") or {}).get("value") or "")
+        quote = build_quote(
+            spec,
+            said_seats=self.said_seats,
+            size_band=str(band),
+            company=self.session.prospect.company or self.contact.company_guess,
+        )
+        if quote is None:
+            # Tiers with no amounts are legitimate: "Enterprise, quoted". There is nothing to
+            # compute, so nothing is put on screen and nobody is given a number.
+            yield Panel(
+                "pricing",
+                {
+                    "company": self.session.prospect.company,
+                    "tiers": [
+                        {"name": t.name, "per_seat": t.price, "for": t.detail}
+                        for t in spec.pricing
+                    ],
+                    "note": spec.pricing_note,
+                },
+            )
+            async for event in self._speak(
+                said or "(Pricing is on screen. Say how it works, never a figure, and offer to "
+                "have someone quote it properly.)"
+            ):
+                yield event
+            return
+
+        self.quote = quote
+        yield Panel("quote", quote.as_dict())
+        async for event in self._say(quote.spoken()):
+            yield event
+        async for event in self._speak(
+            "(Their quote is on screen and you have just read it out. Do NOT repeat the figure. "
+            "Ask in one sentence whether that works for them.)"
+        ):
+            yield event
+
+    async def _close(self, said: str) -> AsyncIterator[AgendaEvent]:
+        """Ask for the business.
+
+        The one step with no tool and no panel. Everything before it was information; this is
+        the question, and an agent that shows a quote and then waits is a brochure.
+        """
+        async for event in self._speak(
+            said or "(You have shown them the product and their number. Ask for the business, "
+            "once, plainly, in one sentence.)"
+        ):
+            yield event
+
+    async def _pay(self, said: str) -> AsyncIterator[AgendaEvent]:
+        """Put a checkout in front of them.
+
+        THE AGENT NEVER SEES A CARD. It asks the payment server for a hosted checkout built from
+        the quote object and shows the link; the card is entered on the processor's page. That
+        keeps card data out of this product entirely — no PCI scope, and no language model
+        within reach of a card number.
+
+        THE AMOUNT COMES FROM THE QUOTE, NEVER FROM THE CONVERSATION. An agent that invents a
+        booking wastes a slot. An agent that invents an amount takes somebody's money.
+        """
+        if self.quote is None:
+            # Nothing agreed yet. Quote first — a checkout for an amount nobody has seen is how
+            # a sale becomes a chargeback.
+            async for event in self._enter(Step.QUOTE, said=said):
+                yield event
+            return
+
+        try:
+            checkout = await self.tools.call(
+                "payments.create_checkout",
+                {
+                    "amount": self.quote.total,
+                    "currency": self.quote.currency,
+                    "description": f"{self.quote.tier}, {self.quote.seats} seats",
+                    "email": self.contact.email,
+                    "company": self.quote.company,
+                    "period": self.quote.period,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.info("checkout failed: %s", exc)
+            async for event in self._say(
+                "I can't open the checkout just now — let me get a time with someone instead."
+            ):
+                yield event
+            async for event in self._enter(Step.BOOKING):
+                yield event
+            return
+
+        self.checkout = checkout
+        yield Panel("checkout", {**checkout, "quote": self.quote.as_dict()})
+        async for event in self._say(
+            "I've put the checkout on your screen — you can finish it there whenever you're "
+            "ready, and I'll never ask you for card details myself."
+        ):
+            yield event
 
     async def _offer_times(self, said: str) -> AsyncIterator[AgendaEvent]:
-        """Offer real slots, in words, from the calendar.
+        """Offer real slots with a real person.
+
+        THIS IS THE ESCALATION, NOT THE GOAL. The whole point of the agent is that a buyer does
+        not wait for a rep, so a booking means the deal genuinely needs a human — procurement, a
+        technical question nobody configured, or somebody who simply wants one.
 
         THE TIMES ARE NOT WRITTEN BY THE MODEL. They come from the tool already phrased for
-        speech, and are read out verbatim. A model that invents "how about Thursday?" has
-        promised a slot nobody holds.
+        speech and are read verbatim. A model that invents "how about Thursday?" has promised a
+        slot nobody holds.
         """
+        if self.wants_human:
+            # The fixed line first, before any tool can fail. Somebody who asked for a person
+            # should hear the answer to that, not a calendar error.
+            async for event in self._say(self.session.handoff_line):
+                yield event
+
         try:
             found = await self.tools.call(
                 "calendar.list_availability", {"limit": 3, "duration_minutes": 30}
@@ -647,7 +922,7 @@ class Agenda:
         except Exception as exc:  # noqa: BLE001
             log.info("no availability: %s", exc)
             async for event in self._say(
-                "My diary isn't loading — let me have someone send you times instead."
+                "My diary isn't loading - let me have someone send you times instead."
             ):
                 yield event
             return
@@ -655,12 +930,12 @@ class Agenda:
         self.offered = found.get("slots", [])
         if not self.offered:
             async for event in self._say(
-                "I don't have anything free this week — someone will send you times."
+                "I don't have anything free this week - someone will send you times."
             ):
                 yield event
             return
 
-        yield Panel("slots", {"slots": self.offered})
+        yield Panel("slots", {"slots": self.offered, "with_person": True})
         spoken = " or ".join(slot["spoken"] for slot in self.offered[:2])
         async for event in self._say(f"I could do {spoken}. Would either of those work?"):
             yield event
@@ -684,7 +959,7 @@ class Agenda:
         except Exception as exc:  # noqa: BLE001
             log.info("booking failed: %s", exc)
             async for event in self._say(
-                "That didn't go through — I'll have someone confirm it with you."
+                "That didn't go through - I'll have someone confirm it with you."
             ):
                 yield event
             return
@@ -700,55 +975,43 @@ class Agenda:
         self.booking = result
         yield Panel("booking", result)
         async for event in self._say(
-            f"Done — {result['spoken']}. I've sent it to {self.contact.email}."
-        ):
-            yield event
-
-    async def _price(self, said: str) -> AsyncIterator[AgendaEvent]:
-        """Show the tiers THIS agent was configured with.
-
-        THE FIGURES ARE NOT SPOKEN AND NOT INVENTED. The panel shows the tenant's own published
-        tiers; the model is told to say it depends and that a person quotes it. A number said
-        out loud on a sales call is a commitment, and this one would be a 1.5B model's guess —
-        which is why `Guardrails.speak_prices` is a setting a tenant is not allowed to turn on.
-        """
-        size = ((self.enrichment.get("size") or {}).get("value") or "").replace("_", " ")
-        spec = self.session.spec
-        tiers = (
-            [{"name": t.name, "per_seat": t.price, "for": t.detail} for t in spec.pricing]
-            if spec
-            else []
-        )
-        if not tiers:
-            # An agent whose owner has not entered prices has nothing to show, and inventing a
-            # placeholder tier would put a number on a customer's screen that nobody agreed to.
-            async for event in self._say(
-                "I don't have pricing in front of me — let me have someone send it across."
-            ):
-                yield event
-            return
-
-        yield Panel(
-            "pricing",
-            {
-                "company": self.session.prospect.company or self.contact.company_guess,
-                "size": size,
-                "tiers": tiers,
-                "note": spec.pricing_note if spec else "",
-            },
-        )
-        async for event in self._speak(
-            said or "(They asked about price. It is on screen. Say how it works, not a figure.)"
+            f"Done - {result['spoken']}. I've sent it to {self.contact.email}."
         ):
             yield event
 
     async def _wrap(self, said: str) -> AsyncIterator[AgendaEvent]:
         async for event in self._speak(said or "(Close the call.)"):
             yield event
-        async for event in self._close_out(
-            "meeting_booked" if self.booking else "no_decision"
-        ):
+        async for event in self.end():
             yield event
+
+    async def end(self) -> AsyncIterator[AgendaEvent]:
+        """Finish the call, however it ended.
+
+        MOST CALLS DO NOT END AT `WRAP`. They end because somebody closed the tab, and a call
+        that only writes itself down when it reaches the last step of the plan loses every call
+        that mattered enough to be interrupted. Idempotent, because the socket teardown and a
+        natural wrap can both arrive.
+        """
+        if self.closed:
+            return
+        self.closed = True
+        async for event in self._close_out(self._outcome()):
+            yield event
+
+    def _outcome(self) -> str:
+        """What this call actually achieved, best first.
+
+        A paid checkout beats a booked meeting beats a conversation. Ordering them here rather
+        than at each call site keeps the pipeline honest about which calls were worth having.
+        """
+        if self.checkout is not None:
+            return "checkout_sent"
+        if self.booking is not None:
+            return "meeting_booked"
+        if self.wants_human:
+            return "handed_off"
+        return "no_decision"
 
     # ── the end ─────────────────────────────────────────────────────────
     async def _close_out(self, outcome: str) -> AsyncIterator[AgendaEvent]:
@@ -804,6 +1067,8 @@ class Agenda:
         company = self.session.prospect.company or self.contact.company_guess or "the prospect"
         if outcome == "meeting_booked" and self.booking:
             return f"{company}: demo booked for {self.booking['spoken']}."
+        if outcome == "checkout_sent" and self.quote is not None:
+            return f"{company}: quoted {self.quote.money(self.quote.total)} and sent checkout."
         if outcome == "handed_off":
             return f"{company}: asked for a person mid-call."
         return f"{company}: spoke to Liv, no meeting booked."

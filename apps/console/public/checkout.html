@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Checkout · Rainmaker</title>
+    <!--
+      THE PAGE THE AGENT SENDS PEOPLE TO WHEN THERE IS NO PAYMENT PROVIDER CONFIGURED.
+
+      It is deliberately a real page rather than a placeholder: the point of the mock provider
+      is that a fresh clone can run the whole call end to end — quote, checkout, paid — and a
+      checkout step nobody can click through is a checkout step nobody has debugged.
+
+      IT SAYS WHAT IT IS, TWICE, AND ASKS FOR NOTHING. No card field, no expiry, no CVC, not
+      even a disabled one. A convincing fake payment form is the kind of thing that ends up
+      screenshotted somewhere without its caption, and there is no version of this repository
+      that needs one. With STRIPE_SECRET_KEY set, the agent links to Stripe instead and this
+      page is never reached.
+    -->
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --surface: #fff;
+        --fg: #16181d;
+        --fg-2: #4d5460;
+        --fg-3: #7b8394;
+        --line: #e3e6eb;
+        --accent: #2f6df6;
+        --ok: #10806a;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d0f13;
+          --surface: #15181e;
+          --fg: #f2f4f7;
+          --fg-2: #b6bdc9;
+          --fg-3: #7b8394;
+          --line: #262b34;
+          --accent: #6f9bff;
+          --ok: #35c69f;
+        }
+      }
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        min-height: 100vh; display: grid; place-items: center; padding: 24px;
+        background: var(--bg); color: var(--fg);
+        font: 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .card {
+        inline-size: min(30rem, 100%); background: var(--surface); border: 1px solid var(--line);
+        border-radius: 16px; padding: 32px; box-shadow: 0 20px 50px rgb(0 0 0 / 0.08);
+      }
+      .badge {
+        display: inline-block; padding: 4px 10px; border-radius: 999px;
+        background: color-mix(in oklab, var(--accent) 14%, transparent);
+        color: var(--accent); font-size: 12px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.08em;
+      }
+      h1 { font-size: 22px; margin-block: 18px 6px; letter-spacing: -0.01em; }
+      .sub { color: var(--fg-2); font-size: 14px; }
+      .total {
+        margin-block: 26px 8px; font-size: 44px; font-weight: 650; letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+      }
+      dl { margin-block: 22px; display: grid; gap: 10px; }
+      dl > div {
+        display: flex; justify-content: space-between; gap: 16px; font-size: 14px;
+        padding-block-end: 10px; border-block-end: 1px dashed var(--line);
+      }
+      dl > div:last-child { border: 0; padding: 0; }
+      dt { color: var(--fg-3); }
+      dd { font-weight: 620; font-variant-numeric: tabular-nums; }
+      button {
+        inline-size: 100%; padding: 14px; border: 0; border-radius: 999px; cursor: pointer;
+        background: var(--accent); color: #fff; font: inherit; font-weight: 650;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .note { margin-block-start: 18px; color: var(--fg-3); font-size: 12.5px; }
+      .paid { color: var(--ok); font-weight: 650; }
+      .miss { color: var(--fg-3); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main class="card" id="card">
+      <p class="miss">Loading…</p>
+    </main>
+
+    <script type="module">
+      const id = new URLSearchParams(location.search).get("id") ?? "";
+      const card = document.getElementById("card");
+      const escape = (value) =>
+        String(value ?? "").replace(/[&<>"']/g, (c) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
+
+      async function load() {
+        if (!id) return render(null);
+        try {
+          const response = await fetch(`/api/checkouts/${encodeURIComponent(id)}`);
+          render(response.ok ? await response.json() : null);
+        } catch {
+          render(null);
+        }
+      }
+
+      function render(checkout) {
+        if (!checkout || !checkout.found) {
+          card.innerHTML = `<p class="miss">That checkout link has expired or was never created.</p>`;
+          return;
+        }
+        const paid = checkout.status === "paid";
+        card.innerHTML = `
+          <span class="badge">${paid ? "Paid" : "Test mode"}</span>
+          <h1>${escape(checkout.description || "Subscription")}</h1>
+          <p class="sub">${escape(checkout.company || checkout.email)}</p>
+          <div class="total">${escape(checkout.amount_display)}</div>
+          <p class="sub">${checkout.period ? "per " + escape(checkout.period) : "one-off"}</p>
+          <dl>
+            <div><dt>Billed to</dt><dd>${escape(checkout.email)}</dd></div>
+            <div><dt>Reference</dt><dd>${escape(checkout.id)}</dd></div>
+            <div><dt>Status</dt><dd class="${paid ? "paid" : ""}">${paid ? "Paid" : "Awaiting payment"}</dd></div>
+          </dl>
+          ${
+            paid
+              ? `<p class="note">Recorded ${escape((checkout.paid_at || "").slice(0, 16).replace("T", " "))}. A receipt would go to ${escape(checkout.email)}.</p>`
+              : `<button id="pay">Complete payment</button>
+                 <p class="note">
+                   This is the local mock provider that ships with the repository, so no card is
+                   asked for and no money moves. With a payment provider configured, the agent
+                   links to that provider&rsquo;s own hosted page instead and this one is never
+                   reached &mdash; the agent never handles card details either way.
+                 </p>`
+          }
+        `;
+        document.getElementById("pay")?.addEventListener("click", async (event) => {
+          event.target.disabled = true;
+          event.target.textContent = "Recording…";
+          await fetch(`/api/checkouts/${encodeURIComponent(id)}/pay`, { method: "POST" });
+          load();
+        });
+      }
+
+      load();
+    </script>
+  </body>
+</html>

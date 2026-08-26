@@ -17,8 +17,9 @@ from typing import Any
 
 import pytest
 
+from rainmaker.agents.store import liv_spec
 from rainmaker.calls.agenda import Agenda, Panel, Phase, Step, detect_intent, read_marker
-from rainmaker.calls.intake import FREE_PROVIDERS, InvalidEmail, parse_contact
+from rainmaker.calls.intake import FREE_PROVIDERS, IntakeError, parse_contact, parse_intake
 from rainmaker.calls.naming import clean_company_name
 from rainmaker.calls.pipeline import CallPipeline, Spoke
 from rainmaker.calls.providers import ClientSpeechToText, ScriptedLanguageModel, SilentTextToSpeech
@@ -61,12 +62,81 @@ class TestTheEmailIsTheColdStart:
 
     def test_nonsense_is_refused_with_a_sentence(self):
         """Someone is watching a form. The failure has to be sayable, not a validation code."""
-        with pytest.raises(InvalidEmail) as caught:
+        with pytest.raises(IntakeError) as caught:
             parse_contact("dana at corvus")
         assert "email address" in caught.value.spoken.lower()
 
     def test_the_domain_is_normalised(self):
         assert parse_contact("a@WWW.Corvus.IO").domain == "corvus.io"
+
+
+class TestTheThreeFieldFrontDoor:
+    """NAME, WORK EMAIL, COMPANY. One field was a nicer form and a worse call: the name is how
+    she greets you, the company is what she talks about, and the address is what she reads
+    before she says a word.
+    """
+
+    def test_the_form_produces_a_contact_she_can_open_with(self):
+        contact = parse_intake("Dana Whitfield", "dana@corvusdata.io", "Corvus Data")
+        assert contact.first_name == "Dana"
+        assert contact.company == "Corvus Data"
+        assert contact.domain == "corvusdata.io"
+        assert contact.researchable
+
+    def test_what_they_typed_beats_what_the_local_part_suggests(self):
+        """`dwhitfield@` guesses nothing and `sales@` guesses wrong. A typed name is not a
+        guess at all."""
+        assert parse_intake("Dana", "dwhitfield@corvusdata.io", "Corvus").first_name == "Dana"
+        assert parse_intake("Dana", "sales@corvusdata.io", "Corvus").first_name == "Dana"
+
+    def test_a_personal_address_is_turned_away_with_the_reason(self):
+        """The domain is the entire cold start and it is also the qualifying question. Somebody
+        who will not give a business address is not a buyer worth a call, and a rep would have
+        reached the same conclusion a minute later."""
+        with pytest.raises(IntakeError) as caught:
+            parse_intake("Sam Reed", "sam@gmail.com", "Corvus Data")
+        assert caught.value.field == "email"
+        assert "work email" in caught.value.spoken.lower()
+
+    @pytest.mark.parametrize(
+        "name,email,company,field",
+        [
+            ("", "dana@corvusdata.io", "Corvus", "name"),
+            ("Dana", "not an address", "Corvus", "email"),
+            ("Dana", "dana@corvusdata.io", "", "company"),
+            ("Dana", "dana@mailinator.com", "Corvus", "email"),
+        ],
+    )
+    def test_every_refusal_names_its_field_and_says_why(
+        self, name: str, email: str, company: str, field: str
+    ):
+        with pytest.raises(IntakeError) as caught:
+            parse_intake(name, email, company)
+        assert caught.value.field == field
+        assert caught.value.spoken.endswith(("?", ".")), caught.value.spoken
+
+    @pytest.mark.parametrize(
+        "typed,company",
+        [
+            ("Corvus Data", "Corvus Data"),
+            ("corvusdata.io", "Corvusdata"),
+            ("Corvus Data (corvusdata.io)", "Corvus Data"),
+            ("https://www.corvusdata.io/about", "Corvusdata"),
+        ],
+    )
+    def test_a_company_field_is_read_as_a_name_however_it_was_typed(
+        self, typed: str, company: str
+    ):
+        """People answer "company" with a name, a website, or both. An agent addressing a
+        company called "About" is the version where the URL was stripped carelessly."""
+        assert parse_intake("Dana", "dana@corvusdata.io", typed).company == company
+
+    def test_a_website_they_typed_wins_over_their_mail_domain(self):
+        """Holding companies, agencies, and anyone whose mail domain is not their marketing
+        domain. They know which site describes their business; the mail server does not."""
+        contact = parse_intake("Dana", "dana@holdco.com", "Corvus Data (corvusdata.io)")
+        assert contact.domain == "corvusdata.io"
+        assert contact.domain_from_company
 
 
 class TestTheNameSheSaysOutLoud:
@@ -76,7 +146,7 @@ class TestTheNameSheSaysOutLoud:
             ("Home \\ Anthropic", "Anthropic"),
             ("Plans & Pricing | Claude by Anthropic", "Claude by Anthropic"),
             ("Stripe | Financial Infrastructure", "Stripe"),
-            ("About us | Northgate Dental", "Northgate Dental"),
+            ("About us | Corvus Data", "Corvus Data"),
             ("Acme Inc", "Acme Inc"),
         ],
     )
@@ -98,11 +168,13 @@ class TestWhatMovesTheCall:
     @pytest.mark.parametrize(
         "said,step",
         [
-            ("so how much is it", Step.PRICING),
-            ("what does it cost for a team our size", Step.PRICING),
+            ("so how much is it", Step.QUOTE),
+            ("what does it cost for a team our size", Step.QUOTE),
             ("can we book something next week", Step.BOOKING),
             ("let's schedule a call", Step.BOOKING),
-            ("show me what it looks like", Step.SHOWING),
+            ("show me what it looks like", Step.GUIDE),
+            ("how do you compare to a chat widget", Step.COMPARE),
+            ("alright, sign me up", Step.PAY),
         ],
     )
     def test_an_explicit_ask_outranks_the_plan(self, said: str, step: Step):
@@ -193,6 +265,18 @@ _DEFAULTS: dict[str, Any] = {
     "crm.record_call_outcome": {"ops_written": 4},
     "crm.log_call": {"call_id": "call_test", "ops_written": 5},
     "email.draft_recap": {"subject": "Following up", "body": "Hi Dana,", "can_send": False},
+    "payments.create_checkout": {
+        "created": True,
+        "checkout_id": "co_test",
+        "url": "http://localhost:5173/checkout.html?id=co_test",
+        "provider": "mock",
+        "amount": 255_000,
+        "currency": "usd",
+        "amount_display": "$2,550",
+        "period": "month",
+        "description": "Business, 40 seats",
+        "test_mode": True,
+    },
 }
 
 
@@ -203,8 +287,6 @@ def build(email: str = "dana.whitfield@corvus.example", spec: Any = None, **over
     call uses one — but it is not what a configured agent looks like, and the tests about what
     she may say and charge need the configured shape.
     """
-    from rainmaker.agents.store import liv_spec
-
     spec = liv_spec() if spec is None else spec
     stt = ClientSpeechToText()
     session = CallSession(
@@ -253,7 +335,10 @@ class TestOpeningTheCall:
         assert found and found[0].data["company"] == "Corvus Data"
         assert any("ClickHouse" in fact for fact in found[0].data["facts"])
 
-    async def test_a_personal_address_skips_research_and_says_so(self):
+    async def test_a_contact_with_nothing_to_research_says_so(self):
+        """The front door now insists on a work address, but the guard stays: the plain `start`
+        call has no form in front of it, and researching gmail.com opens Google's marketing
+        site and describes it back to them."""
         agenda, tools = build("someone@gmail.com")
         events = await collect(agenda.begin())
         assert not tools.named("research.research_company")
@@ -266,16 +351,40 @@ class TestOpeningTheCall:
         assert panels(events, "note")
 
 
-class TestShowingThemTheirOwnSite:
+class TestShowingThemTheProduct:
+    """THE TOUR DRIVES THE SELLER'S PRODUCT, NOT THE BUYER'S SITE, and the two are opposite
+    directions through the same browser tool. Research opens the buyer's website to work out who
+    they are. The guide opens ours to show them what they would be buying. For a while this code
+    did the first and called it the second, so the demo consisted of narrating the prospect's own
+    homepage back at them.
+    """
+
+    @staticmethod
+    def tour_pages(tools: Any) -> list[str]:
+        """Browse calls that are part of the demo, not part of the research."""
+        return [
+            call["url"]
+            for call in tools.named("research.browse")
+            if "corvus.example" not in call["url"]
+        ]
+
     async def test_a_page_is_opened_and_put_on_screen(self):
         agenda, tools = build()
         await collect(agenda.begin())
         events = await collect(agenda.respond("show me what it looks like"))
 
-        assert tools.named("research.browse"), "she talked about a page without opening it"
+        assert self.tour_pages(tools), "she talked about a page without opening it"
         shots = panels(events, "browser")
         assert [p.data["state"] for p in shots] == ["opening", "open"]
         assert shots[1].data["frame"], "no picture reached the stage"
+
+    async def test_the_page_she_opens_is_ours_not_theirs(self):
+        agenda, tools = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("show me what it looks like"))
+
+        stops = {stop.url for stop in liv_spec().tour}
+        assert set(self.tour_pages(tools)) <= stops
 
     async def test_the_model_is_told_what_is_on_the_screen(self):
         """Given only a URL it would describe a page it has not seen, and the narration would
@@ -286,13 +395,17 @@ class TestShowingThemTheirOwnSite:
         await collect(agenda.respond("show me what it looks like"))
         assert any("49 dollars" in prompt for prompt in llm.calls)
 
-    async def test_the_same_page_is_not_shown_twice(self):
-        """A slideshow of six tabs is a screen share nobody follows."""
+    async def test_asking_for_more_moves_the_tour_on(self):
+        """A step that only runs on arrival answers "show me another" by talking about the page
+        already on the screen."""
         agenda, tools = build()
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
         await collect(agenda.respond("show me another"))
-        assert len(tools.named("research.browse")) == 1
+
+        seen = self.tour_pages(tools)
+        assert len(seen) == 2, "the tour did not move on"
+        assert len(set(seen)) == 2, "the same page twice is a screen share nobody follows"
 
 
 class TestTheSentencesTheModelIsNotTrustedWith:
@@ -357,32 +470,158 @@ class TestTheSentencesTheModelIsNotTrustedWith:
         assert not tools.named("calendar.book_meeting")
 
 
-class TestPriceIsShownAndNotSpoken:
-    async def test_the_figures_go_on_screen(self):
+class TestTheNumberIsComputedNotGenerated:
+    """A CALL THAT CANNOT SAY A PRICE CANNOT CLOSE, which is why this changed. The old rule was
+    that no figure was ever spoken; a demo that ends in "someone will send you a quote" is a
+    lead-generation agent, and this one is supposed to be able to finish. The rule that replaced
+    it is narrower and stronger: the MODEL never produces a figure. The platform computes the
+    quote and speaks its own sentence, the way the calendar reads out its own times.
+    """
+
+    async def test_the_quote_goes_on_screen_with_its_arithmetic(self):
         agenda, _ = build()
+        await collect(agenda.begin())
+        events = await collect(agenda.respond("how much does it cost for 40 people?"))
+
+        quoted = panels(events, "quote")
+        assert quoted, "she talked about price without putting the number on screen"
+        data = quoted[0].data
+        assert data["seats"] == 40
+        assert data["seats_from"] == "said"
+        # Every line a buyer would check before agreeing to it.
+        assert data["unit_display"] and data["subtotal_display"] and data["total_display"]
+
+    async def test_the_spoken_figure_is_the_platforms_sentence_verbatim(self):
+        """The one place a number becomes a commitment is not where you want a 1.5B model
+        paraphrasing."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        events = await collect(agenda.respond("how much does it cost for 40 people?"))
+
+        quote = panels(events, "quote")[0].data
+        assert quote["spoken"] in spoken(events)
+
+    async def test_the_model_is_told_the_figure_is_already_said(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        llm = agenda.session.pipeline.llm
+        before = len(llm.calls)
+        await collect(agenda.respond("how much does it cost?"))
+        asked = " ".join(llm.calls[before:])
+        assert "do not repeat the figure" in asked.lower()
+
+    async def test_pricing_with_no_amounts_shows_the_tiers_and_quotes_nothing(self):
+        """"Enterprise, quoted" is a legitimate answer. There is nothing to compute, so nothing
+        goes on the screen with a number on it."""
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import Tier
+
+        unpriced = replace(liv_spec(), pricing=(Tier("Enterprise", "quoted", "talk to us"),))
+        agenda, _ = build(spec=unpriced)
         await collect(agenda.begin())
         events = await collect(agenda.respond("how much does it cost?"))
+
+        assert not panels(events, "quote")
         priced = panels(events, "pricing")
         assert priced and priced[0].data["tiers"]
+        assert "$" not in spoken(events)
 
-    async def test_no_figure_is_ever_said_out_loud(self):
-        """On screen a number is a reference. Spoken on a sales call it is a quote, and this one
-        would be a 1.5B model's guess."""
+
+class TestClosingTheDeal:
+    """A BUYER READY AT ELEVEN AT NIGHT SHOULD BE ABLE TO FINISH. That is the whole reason the
+    funnel goes past "book a meeting": the agent exists so nobody waits for a rep, and a call
+    that can only end in a calendar invite has handed the buyer back to the queue it replaced.
+    """
+
+    async def test_the_checkout_is_built_from_the_quote_not_the_conversation(self):
+        """An agent that invents a booking wastes a slot. An agent that invents an amount takes
+        somebody's money."""
+        agenda, tools = build()
+        await collect(agenda.begin())
+        quoted = await collect(agenda.respond("how much for 40 people?"))
+        await collect(agenda.respond("great, sign me up"))
+
+        asked = tools.named("payments.create_checkout")
+        assert asked, "she agreed a sale and never opened a checkout"
+        assert asked[0]["amount"] == panels(quoted, "quote")[0].data["total"]
+        assert asked[0]["email"] == agenda.contact.email
+
+    async def test_a_checkout_goes_on_screen_as_a_link(self):
         agenda, _ = build()
         await collect(agenda.begin())
-        said = spoken(await collect(agenda.respond("how much does it cost?")))
-        assert "$" not in said
-        assert "40" not in said and "75" not in said
+        await collect(agenda.respond("how much for 40 people?"))
+        events = await collect(agenda.respond("great, sign me up"))
+
+        shown = panels(events, "checkout")
+        assert shown and shown[0].data["url"].startswith("http")
+        assert "card" in spoken(events).lower(), "she did not say she never asks for a card"
+
+    async def test_nobody_is_asked_to_pay_for_a_number_they_have_not_seen(self):
+        """A checkout for an amount nobody has agreed is how a sale becomes a chargeback."""
+        agenda, tools = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("I'll take it"))
+
+        assert agenda.step is Step.QUOTE
+        assert not tools.named("payments.create_checkout")
+
+    async def test_a_payment_server_that_is_down_offers_a_person_instead(self):
+        agenda, _ = build(**{"payments.create_checkout": RuntimeError("no server")})
+        await collect(agenda.begin())
+        await collect(agenda.respond("how much for 40 people?"))
+        events = await collect(agenda.respond("sign me up"))
+
+        assert agenda.step is Step.BOOKING
+        assert panels(events, "slots")
+
+    async def test_a_paid_checkout_is_the_outcome_that_is_written_down(self):
+        agenda, tools = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("how much for 40 people?"))
+        await collect(agenda.respond("sign me up"))
+        await collect(agenda.end())
+
+        outcomes = tools.named("crm.record_call_outcome")
+        assert outcomes and outcomes[0]["outcome"] == "checkout_sent"
+
+    async def test_the_comparison_on_screen_is_the_tenants_words(self):
+        """A comparison table a language model wrote about a named competitor is a defamation
+        risk with a grid layout."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        events = await collect(agenda.respond("how do you compare to a chat widget?"))
+
+        shown = panels(events, "comparison")
+        assert shown
+        rivals = {r["name"]: r for r in shown[0].data["rivals"]}
+        assert "a chat widget" in rivals
+        configured = {c.name: c for c in liv_spec().competitors}["a chat widget"]
+        assert rivals["a chat widget"]["positioning"] == configured.positioning
 
 
 class TestHowACallEnds:
-    async def test_asking_for_a_person_ends_the_sell_and_writes_it_down(self):
-        agenda, tools = build()
+    async def test_asking_for_a_person_stops_the_sell_and_offers_the_diary(self):
+        """NOBODY IS IN THE ROOM TO HAND TO — that is the product. Asking for a person cannot
+        mean a transfer, so it means a time with one: the fixed line is still said first, and
+        what follows it is a diary rather than a promise."""
+        agenda, _ = build()
         await collect(agenda.begin())
         events = await collect(agenda.respond("can I just talk to a real person"))
 
-        assert agenda.step is Step.HANDOFF
-        assert "bring someone in" in spoken(events).lower()
+        assert agenda.step is Step.BOOKING
+        assert agenda.wants_human
+        said = spoken(events).lower()
+        assert "bring someone in" in said
+        assert "tuesday the fifth at nine in the morning" in said
+        assert panels(events, "slots")
+
+    async def test_a_call_that_wanted_a_person_is_written_down_as_one(self):
+        agenda, tools = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("can I just talk to a real person"))
+        await collect(agenda.end())
+
         outcomes = tools.named("crm.record_call_outcome")
         assert outcomes and outcomes[0]["outcome"] == "handed_off"
 
@@ -392,6 +631,9 @@ class TestHowACallEnds:
         agenda, tools = build()
         await collect(agenda.begin())
         await collect(agenda.respond("can I just talk to a real person"))
+        assert not tools.named("crm.log_call"), "the database round trip landed inside the call"
+
+        await collect(agenda.end())
         logged = tools.named("crm.log_call")
         assert logged and logged[0]["transcript"]
         assert "Prospect: can I just talk to a real person" in logged[0]["transcript"]
@@ -399,14 +641,16 @@ class TestHowACallEnds:
     async def test_a_follow_up_is_drafted_even_though_sending_is_off(self):
         agenda, tools = build()
         await collect(agenda.begin())
-        events = await collect(agenda.respond("can I just talk to a real person"))
+        await collect(agenda.respond("can I just talk to a real person"))
+        events = await collect(agenda.end())
         assert tools.named("email.draft_recap")
         assert panels(events, "draft")
 
     async def test_a_crm_that_is_down_does_not_break_a_call_that_already_happened(self):
         agenda, _ = build(**{"crm.record_call_outcome": RuntimeError("gone")})
         await collect(agenda.begin())
-        events = await collect(agenda.respond("can I just talk to a real person"))
+        await collect(agenda.respond("can I just talk to a real person"))
+        events = await collect(agenda.end())
         assert any(isinstance(e, Phase) for e in events)
 
 
@@ -487,18 +731,22 @@ class TestSheSaysWhatSheIsBeforeAnythingElse:
 
 
 class TestWhoseWebsiteItIs:
-    async def test_the_prompt_names_the_company_whose_page_is_on_screen(self):
-        """Given "you are showing them their own pricing page", the model said "you might have
-        stumbled upon OUR pricing page" — claiming Stripe's page as Rainmaker's, to someone who
-        works at Stripe."""
+    """BOTH DIRECTIONS ARE A REAL MISTAKE, and the same tool makes both. Told "you are showing
+    them their own pricing page", the model said "you might have stumbled upon OUR pricing page"
+    — claiming Stripe's page as Rainmaker's, to someone who works at Stripe. Now that the tour
+    drives our product instead, the inverse is available: narrating our own demo as though it
+    were theirs. So the prompt names both companies and says which one owns the page.
+    """
+
+    async def test_the_prompt_says_the_page_on_screen_is_ours(self):
         agenda, _ = build()
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
 
         narration = [p for p in agenda.session.pipeline.llm.calls if "screen-sharing" in p]
         assert narration, "the narration prompt did not survive"
-        assert "Corvus Data" in narration[0]
-        assert "not to Rainmaker" in narration[0]
+        assert "Rainmaker's OWN product" in narration[0]
+        assert "belongs to Rainmaker, not to Corvus Data" in narration[0]
 
 
 class TestTheAudienceNeverHearsTheStageDirections:
@@ -539,7 +787,7 @@ class TestTheAudienceNeverHearsTheStageDirections:
         agenda, _ = build()
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
-        assert agenda.step is not Step.HANDOFF
+        assert not agenda.wants_human
 
 
 class TestFactsSheIsNotAllowedToRepeat:
@@ -585,46 +833,37 @@ class TestFactsSheIsNotAllowedToRepeat:
 class TestSheScrollsToThePoint:
     """`browse` has taken a `scroll_to` since it was written and nothing passed one, so every
     page opened at the top and she narrated a viewport the prospect had to scroll past to check.
+
+    THE PHRASE IS THE TOUR'S, NOT A GUESS. A stop declares what it is there to show, so the
+    scroll target is configuration the tenant wrote rather than a word the agent hoped would be
+    on the page.
     """
 
-    async def test_a_pricing_page_is_scrolled_to_the_pricing(self):
+    @staticmethod
+    def tour_calls(tools: Any) -> list[dict]:
+        return [c for c in tools.named("research.browse") if "corvus.example" not in c["url"]]
+
+    async def test_a_stop_opens_at_the_thing_it_exists_to_show(self):
         agenda, tools = build()
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
 
-        browsed = tools.named("research.browse")
-        assert browsed and browsed[0]["scroll_to"] == "pricing"
-
-    async def test_the_phrase_comes_from_what_research_actually_found(self):
-        """Guessing a phrase gets a page that does not contain it. These come from the facts, so
-        the page demonstrably has them."""
-        agenda, tools = build(
-            **{
-                "research.pages_worth_showing": {
-                    "pages": [{"label": "careers", "url": "https://corvus.example/careers"}]
-                },
-                "research.research_company": {
-                    "name": {"value": "Corvus Data"},
-                    "hiring": [{"title": "Data Engineer"}, {"title": "Platform Engineer"}],
-                    "pages_fetched": [],
-                },
-            }
-        )
-        await collect(agenda.begin())
-        await collect(agenda.respond("show me what it looks like"))
-
-        assert tools.named("research.browse")[0]["scroll_to"] == "Data Engineer"
+        opened = self.tour_calls(tools)
+        wanted = {stop.url: stop.scroll_to for stop in liv_spec().tour}
+        assert opened and opened[0]["scroll_to"] == wanted[opened[0]["url"]]
 
     async def test_nothing_to_aim_at_is_not_an_error(self):
-        """A miss costs nothing: `browse` treats an absent phrase as no scroll."""
-        agenda, tools = build(
-            **{
-                "research.pages_worth_showing": {
-                    "pages": [{"label": "about", "url": "https://corvus.example/about"}]
-                },
-                "research.research_company": {"name": {"value": "Corvus"}, "pages_fetched": []},
-            }
+        """A miss costs nothing: `browse` treats an absent phrase as no scroll, and a stop is
+        allowed to have nothing in particular to point at."""
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import TourStop
+
+        spec = replace(
+            liv_spec(),
+            tour=(TourStop(url="https://demo.example/", label="the product", shows="the app"),),
         )
+        agenda, tools = build(spec=spec)
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
-        assert tools.named("research.browse")[0]["scroll_to"] == ""
+        assert self.tour_calls(tools)[0]["scroll_to"] == ""

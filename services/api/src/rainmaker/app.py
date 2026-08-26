@@ -50,7 +50,7 @@ from .calls.admission import Admission, visitor_id
 from .calls.agenda import Agenda, Panel, Phase
 from .calls.avatar import build_avatar
 from .calls.avatar import describe as describe_avatar
-from .calls.intake import InvalidEmail, parse_contact
+from .calls.intake import IntakeError, parse_intake
 from .calls.lipsync import LipSync, portrait_file
 from .calls.pipeline import (
     TURN_BUDGET_MS,
@@ -336,12 +336,12 @@ def create_app() -> FastAPI:
     async def call_ws(ws: WebSocket) -> None:
         """One call per socket.
 
-        THE CALL STARTS WITH AN EMAIL ADDRESS, not a button. `email` is the first message: the
-        domain in it is everything Liv knows before she speaks, so research runs on it and the
-        prospect watches that happen. `start` remains for a call with no intake — the plain
-        conversation, no research, no agenda.
+        THE CALL STARTS WITH A FORM, not a button. `intake` is the first message and carries a
+        name, a work address and a company: the domain is everything Liv knows before she
+        speaks, so research runs on it and the prospect watches that happen. `start` remains for
+        a call with no intake — the plain conversation, no research, no agenda.
 
-        In:  `email`, `start`, `say`, `pick_slot`, `stop`, `ping`.
+        In:  `intake`, `start`, `say`, `pick_slot`, `stop`, `ping`.
         Out: `disclosure`, `heard`, `token`, `clip`, `done`, `panel`, `phase`, `interrupted`.
 
         Audio goes out as base64 WAV inside the JSON rather than on a binary frame — a second
@@ -400,6 +400,7 @@ def create_app() -> FastAPI:
             avatar=state.avatar,
             disclosure=Disclosure(spoken=spec.guardrails.disclosure),
             max_sentences=spec.guardrails.max_sentences,
+            may_speak_prices=spec.guardrails.speak_prices,
         )
         session = CallSession(
             pipeline,
@@ -491,14 +492,25 @@ def create_app() -> FastAPI:
                 message = await ws.receive_json()
                 kind = message.get("type")
 
-                if kind == "email":
-                    # THE FRONT DOOR. Everything Liv knows before she speaks comes from the
-                    # domain in this address, so a bad one is answered with a sentence rather
-                    # than a validation code — someone is watching a form.
+                if kind in ("intake", "email"):
+                    # THE FRONT DOOR. Everything Liv knows before she speaks comes from these
+                    # three fields, so a bad one is answered with a sentence and the field it
+                    # belongs to rather than a validation code — someone is watching a form
+                    # with her face next to it.
                     try:
-                        contact = parse_contact(message.get("email", ""))
-                    except InvalidEmail as exc:
-                        await ws.send_json({"type": "intake_error", "spoken": exc.spoken})
+                        contact = parse_intake(
+                            message.get("name", ""),
+                            message.get("email", ""),
+                            message.get("company", ""),
+                            ask_company=spec.intake.ask_company if spec else True,
+                            require_work_email=(
+                                spec.intake.require_work_email if spec else True
+                            ),
+                        )
+                    except IntakeError as exc:
+                        await ws.send_json(
+                            {"type": "intake_error", "spoken": exc.spoken, "field": exc.field}
+                        )
                         continue
 
                     agenda = Agenda(session, state.tools, contact)
@@ -518,6 +530,7 @@ def create_app() -> FastAPI:
                                 "email": contact.email,
                                 "domain": contact.domain,
                                 "first_name": contact.first_name,
+                                "company": contact.company_guess,
                                 "researchable": contact.researchable,
                             },
                         }
@@ -621,9 +634,75 @@ def create_app() -> FastAPI:
             # The socket is going; frames for it are worth nothing.
             for task in list(mouths):
                 task.cancel()
+
+            # THE CALL STILL HAPPENED. Most calls end because somebody closed the tab, not
+            # because the agent reached the last step of the plan, and a pipeline that only
+            # records the tidy ones is a pipeline nobody trusts. Nothing is sent — the socket
+            # is gone — but the CRM write and the follow-up draft still run.
+            if agenda is not None:
+                try:
+                    async for _ in agenda.end():
+                        pass
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("could not close out the call: %s", exc)
             # ALWAYS, including when the socket died badly. A leaked live-count is worse than
             # any limit it enforces: the agent stops answering and nothing says why.
             state.admission.finished(agent_key)
+
+    # ─────────────────────────────────────────────────────────── the front door
+    @app.get("/api/agents/front-door")
+    async def front_door(key: str = "") -> dict[str, Any]:
+        """Who is answering, and what their form asks for — before the socket is opened.
+
+        THE WIDGET CANNOT DRAW A FORM IT HAS NOT BEEN TOLD ABOUT. Everything else about an
+        agent arrives on the socket after the call starts, which is fine for a disclosure and
+        useless for the fields somebody has to fill in to start one.
+
+        PUBLIC, AND CAREFUL ABOUT IT. It returns what the page would show anyway — a name, a
+        face, the disclosure — and never knowledge, pricing or tools. An unknown key and an
+        unpublished agent get the same answer as tenant zero rather than a 404, because
+        distinguishing them for a stranger is an enumeration oracle.
+        """
+        spec = state.agents.resolve(key) if key else state.agents.live(LIV_TENANT, LIV_AGENT)
+        if spec is None:
+            spec = state.agents.live(LIV_TENANT, LIV_AGENT)
+        if spec is None:  # pragma: no cover - the seed runs at startup
+            return {"name": "", "company": "", "fields": ["name", "email"]}
+        return {
+            "name": spec.name,
+            "company": spec.company,
+            "portrait": spec.portrait,
+            "disclosure": spec.guardrails.disclosure,
+            **spec.intake.as_dict(),
+        }
+
+    # ─────────────────────────────────────────────────────────── checkouts
+    @app.get("/api/checkouts/{checkout_id}")
+    async def checkout(checkout_id: str) -> dict[str, Any]:
+        """What the mock checkout page renders.
+
+        THROUGH THE TOOL, NOT AROUND IT. The payments server owns that database, and a second
+        reader with its own SQL is a second thing to keep correct. It is also the only way this
+        stays honest when the server is swapped for a hosted one over stdio.
+        """
+        try:
+            return await state.tools.call("payments.checkout_status", {"checkout_id": checkout_id})
+        except Exception as exc:  # noqa: BLE001
+            log.info("checkout lookup failed: %s", exc)
+            return {"found": False, "checkout_id": checkout_id}
+
+    @app.post("/api/checkouts/{checkout_id}/pay")
+    async def pay_checkout(checkout_id: str) -> dict[str, Any]:
+        """Complete a MOCK checkout.
+
+        The tool refuses outright when a real provider is configured — there, the processor's
+        webhook is the only thing allowed to say a checkout was paid, and an endpoint that can
+        say it instead is an endpoint that grants subscriptions nobody paid for.
+        """
+        try:
+            return await state.tools.call("payments.mark_paid", {"checkout_id": checkout_id})
+        except Exception as exc:  # noqa: BLE001
+            return {"paid": False, "reason": str(exc)}
 
     # ─────────────────────────────────────────────────────────── deals (read-only)
     @app.get("/api/deals")
