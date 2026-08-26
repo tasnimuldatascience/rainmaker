@@ -152,7 +152,11 @@ export function CallView({ store }: { store: LocalStore }) {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && send()}
-                  placeholder="Type below, or hold the talk button to speak"
+                  placeholder={
+                    state.handsFree
+                      ? "She's listening — or type"
+                      : "Type, or turn the microphone on and just talk"
+                  }
                   aria-label="Say something to the agent"
                 />
                 <button className="btn" onClick={send} disabled={!draft.trim()}>
