@@ -29,21 +29,42 @@ assuming it scales.
 
 from __future__ import annotations
 
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
 
+
+def _limit(name: str, fallback: int) -> int:
+    """A limit, overridable by environment.
+
+    THE NUMBERS BELOW ARE DEFAULTS, NOT PHYSICS, and they were unreachable until something
+    legitimate needed to exceed them: regenerating the README's screenshots drives eight calls
+    in a few minutes from one machine, and the seventh was refused by a cap meant for a stranger
+    on a customer's marketing site. A rate limit that cannot be raised for an operator is a rate
+    limit somebody edits the source to get past, which is worse than one with a knob on it.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return fallback
+    try:
+        value = int(raw)
+    except ValueError:
+        return fallback
+    return value if value > 0 else fallback
+
+
 #: How many calls one agent may have running at once. The ceiling is the GPU, not the plan:
 #: Qwen holds ~3.1GB, Kokoro takes CPU, and lip-sync runs on the same card, so a laptop-class
 #: box serves one or two conversations before everybody is waiting.
-DEFAULT_CONCURRENT = 2
+DEFAULT_CONCURRENT = _limit("RAINMAKER_MAX_CONCURRENT_CALLS", 2)
 
 #: One visitor, per hour. A real prospect might reload, change their mind, come back after
 #: lunch. Six is past all of that and well short of a loop.
-DEFAULT_PER_VISITOR_HOURLY = 6
+DEFAULT_PER_VISITOR_HOURLY = _limit("RAINMAKER_CALLS_PER_VISITOR_HOUR", 6)
 
 #: One agent, per hour, across every visitor. This is the number a subscription tier sells.
-DEFAULT_PER_AGENT_HOURLY = 60
+DEFAULT_PER_AGENT_HOURLY = _limit("RAINMAKER_CALLS_PER_AGENT_HOUR", 60)
 
 #: A single call. Twenty minutes is longer than any real first call; the cap exists for the tab
 #: somebody left open, not for the conversation somebody is having.

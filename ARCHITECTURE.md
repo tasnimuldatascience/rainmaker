@@ -11,6 +11,12 @@
                                          ▼
    prospect ◄── WebSocket ►  closer agent  ─── transcript, outcome ───┐
                             (text/speech in, Qwen → Kokoro out)       │
+                                    │                                 │
+                     ┌──────────────┼──────────────┐                  │
+                     ▼              ▼              ▼                  │
+              tour: a browser   quote: arith-   payments: a hosted    │
+              on the SELLER's   metic over      checkout. No card     │
+              own pages         published rates ever reaches us       │
                                                                       ▼
    rep's laptop                                              ┌────────────────┐
    ┌──────────────────────────────┐      ops (WS or POST)    │  op log        │
@@ -44,7 +50,8 @@ apps/console/            React 18. Renders a replica; never fetches to read.
 services/api/
   research/              fetch (policy) → extract (deterministic) → schema (provenance)
   sync/                  oplog (durable) + hub (relay, backpressure)
-  calls/                 turn loop, latency budget, disclosure
+  agents/                specs, versions, publishing; quoting.py does the arithmetic
+  calls/                 turn loop, latency budget, disclosure, admission, the agenda
   crm/                   read-only materialisation
   app.py                 the three HTTP surfaces
 ```
@@ -143,6 +150,46 @@ the one path where latency is visible. The browser's recogniser is free, streams
 leaves the CPU to the two models that need it. The cost is real and stated in the console:
 Chrome sends microphone audio to Google. Typing is the offline path.
 
+### The model may not state a figure, and it is a filter rather than a prompt
+
+Rejected: telling the model not to. That is what the prompt already said, and it is what every
+guide on grounding recommends, and it does not work — asked what capacity was available, a
+1.5B model answered "starting from $50 per GPU per hour" about a product that charges $2.40.
+
+Rejected: refusing to synthesise a whole turn containing a figure. The buyer then hears silence
+where an answer should be, and the failure is invisible to everyone except them.
+
+Taken: a streaming filter on the model's tokens only, replacing a figure before it can reach
+synthesis. The platform's own computed sentences — the quote, the checkout, the times offered —
+never pass through it, which is the actual invariant: **the platform may state a number it
+worked out, and the model may not state one at all.**
+
+The cost is a hold on the token stream, and it is scoped to earn it: text waits only while it
+could still be becoming a figure. A turn with no numbers is not delayed at all, and "sixty-four
+nodes are free" is delayed by one word. A fixed window would have been four lines shorter and
+would have stalled every sentence containing a digit — on an agent whose job includes reading
+out live capacity.
+
+### The amount comes from the quote, and the agent never sees a card
+
+An agent that invents a meeting wastes a slot. An agent that invents an amount takes somebody's
+money, and there is no version of that which an apology fixes.
+
+So the amount handed to the payment server is arithmetic over the tenant's published rates, and
+the checkout is hosted: the buyer enters their card on the processor's page, on the processor's
+domain. Nothing here, nothing in the model's context and nothing in a transcript ever contains a
+card number, which keeps the product out of PCI scope rather than in it and managed. The tools
+have no parameter that could carry one, and a test asserts that.
+
+Rejected: a stub for the payment step. A payment step nobody can click through is a payment step
+nobody has debugged, so the default provider is a mock that persists real intents, enforces the
+same invariants, and serves a real page — and is what the tests run against. A key swaps it for
+Stripe, and `mark_paid` then refuses outright, because there the processor's webhook is the only
+thing allowed to say a checkout was paid.
+
+There is a ceiling above which the agent will not charge at all; it reports and offers a person.
+Not a technical limit — an agent that can raise an unbounded charge is a headline.
+
 ### The API materialiser does not implement RGA
 
 It returns note *lengths*, not merged text. A second sequence CRDT is where drift would be worst
@@ -172,6 +219,21 @@ same domain twice reported every skip twice and the agent was not idempotent.
 **5. No offline cold start.** The screenshot script tried to reload with the network severed and
 got `ERR_INTERNET_DISCONNECTED` — proving the app could not boot offline despite all the local
 data being present. Fixed with a service worker; the shot is now in the README as evidence.
+
+**6. A price the model invented, said out loud.** Found by driving a real call rather than by a
+test: asked what capacity was available, the model quoted $50 per GPU-hour for a product priced
+at $2.40. Every other part of the design was already correct, and the prompt already forbade it.
+Nothing was checking, and a rule the model is asked to follow is a request. See the filter above.
+
+**7. A demo agent frozen at whatever was seeded first.** `seed` returned early whenever any
+version was live, so a change to the agent's tour or competitors never reached the running one.
+The symptom was not an error: the comparison step fell through to the model and the tour was
+empty, silently, on a database nobody thought to look at. Idempotent is not the same as inert.
+
+**8. The word "seat", compiled in.** The quote read out "for 40 seats" because the platform had
+only ever had one tenant, who sold seats. Discovered by configuring a second one that sells
+GPU-hours — which is the entire reason to keep a second tenant that is not a reskin of the
+first.
 
 ---
 

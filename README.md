@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-473%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-480%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -123,6 +123,7 @@ STRIPE_SECRET_KEY=sk_…     # take real money instead of the local mock checkou
 OUR_CATEGORY="vector search,learning-to-rank"   # rank job posts mentioning these highest
 RAINMAKER_VOICE=browser    # force the fallback voice, to hear the difference
 RAINMAKER_MAX_CHARGE=…     # the ceiling above which a person has to sign, in minor units
+RAINMAKER_CALLS_PER_VISITOR_HOUR=…   # raise the rate limit; the screenshot script needs this
 ```
 
 ---
@@ -249,13 +250,20 @@ back at them. The prompt now names both companies and says which one owns the pa
 tenant wrote. A comparison table a language model composed about a named competitor is a
 defamation risk with a grid layout.
 
-**4 — Then her number.** Seats from what they said, rate and discount from published pricing,
+**4 — Then her number.** Quantity from what they said, rate and discount from published pricing,
 computed in code — and the sentence that states it is written in code too, the way the calendar
 writes its own times. The model is told the figure is already said and asked to do the one thing
 it is good at: ask whether it works.
 
+<img src="docs/img/quote.png" alt="A quote on screen, with the arithmetic under it" width="100%">
+
+It is also the only place the model is *prevented* rather than instructed: see
+[the price guard](#the-graph-decides-the-model-writes).
+
 **5 — And a checkout.** A hosted page on the payment provider's domain. The agent never sees a
 card, which is what keeps card data out of this product entirely rather than in it and managed.
+
+<img src="docs/img/checkout.png" alt="A hosted checkout for the agreed amount" width="100%">
 
 **6 — A person, if the deal actually needs one.**
 
@@ -488,10 +496,10 @@ worse than the call it prevented.
 
 ```bash
 npm test                       # 53 tests — syncing, text editing, the call surface
-pytest                         # 420 tests — research, syncing, the API, the live call, the tools
+pytest                         # 427 tests — research, syncing, the API, the live call, the tools
 ```
 
-473 tests in total. None of them load a language model: a test that spends six seconds on
+480 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |

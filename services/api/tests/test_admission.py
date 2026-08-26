@@ -149,3 +149,37 @@ class TestWhoTheVisitorIs:
 
     def test_an_empty_forwarded_header_falls_back(self):
         assert visitor_id("10.0.0.1", "") == "10.0.0.1"
+
+
+class TestTheLimitsCanBeRaisedWithoutEditingTheSource:
+    """A rate limit an operator cannot raise is a rate limit somebody edits the source to get
+    past. Found the honest way: regenerating the README drives eight calls from one machine in a
+    few minutes, and the seventh was refused by a cap written for a stranger on a marketing site.
+    """
+
+    def test_an_override_is_read_from_the_environment(self, monkeypatch: pytest.MonkeyPatch):
+        import importlib
+
+        monkeypatch.setenv("RAINMAKER_CALLS_PER_VISITOR_HOUR", "400")
+        module = importlib.reload(importlib.import_module("rainmaker.calls.admission"))
+        try:
+            assert module.DEFAULT_PER_VISITOR_HOURLY == 400
+        finally:
+            monkeypatch.delenv("RAINMAKER_CALLS_PER_VISITOR_HOUR")
+            importlib.reload(module)
+
+    @pytest.mark.parametrize("raw", ["", "   ", "lots", "0", "-3", "3.5"])
+    def test_nonsense_falls_back_to_the_default_rather_than_disabling_the_limit(
+        self, raw: str, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A typo in an environment variable must not quietly remove the ceiling. `0` is the
+        dangerous one: read literally it admits nobody, and read carelessly it means unlimited."""
+        import importlib
+
+        monkeypatch.setenv("RAINMAKER_CALLS_PER_VISITOR_HOUR", raw)
+        module = importlib.reload(importlib.import_module("rainmaker.calls.admission"))
+        try:
+            assert module.DEFAULT_PER_VISITOR_HOURLY == 6
+        finally:
+            monkeypatch.delenv("RAINMAKER_CALLS_PER_VISITOR_HOUR")
+            importlib.reload(module)
