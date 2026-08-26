@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Tessera Compute — GPUs by the hour</title>
+    <!--
+      A CUSTOMER'S WEBSITE, NOT OURS.
+
+      This page exists to prove the thing the whole product rests on: the agent runs on somebody
+      else's site, wearing their name, saying their prices, and Rainmaker is one script tag at
+      the bottom. Tessera Compute is invented; the agent answering on it is real, published
+      through the same store as our own.
+
+      Nothing here shares a stylesheet, a font or a colour with the console. That is the point —
+      if the widget needed our CSS it would not survive contact with a real marketing site.
+
+      IT IS ALSO WHAT THEIR OWN AGENT TOURS. The guide step opens #capacity and #pricing on this
+      page and narrates them, which is why the anchors and the headings the tour scrolls to are
+      load-bearing rather than decoration.
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Inter", system-ui, -apple-system, sans-serif;
+        color: #e9edf2;
+        background: #0a0d12;
+        line-height: 1.6;
+      }
+      code, .mono, td.num, th.num {
+        font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      }
+      header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 20px 6vw; border-bottom: 1px solid #1b222c;
+        background: rgba(10, 13, 18, 0.9); position: sticky; top: 0; backdrop-filter: blur(8px);
+      }
+      .brand { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+      .brand span { color: #4ade9b; }
+      nav a { margin-left: 24px; color: #93a1b3; text-decoration: none; font-size: 14px; }
+      nav a:hover { color: #e9edf2; }
+      .hero { padding: 12vh 6vw 8vh; max-width: 860px; }
+      .kicker {
+        display: inline-block; padding: 4px 11px; border-radius: 999px; font-size: 12px;
+        letter-spacing: 0.08em; text-transform: uppercase; color: #4ade9b;
+        border: 1px solid #1f4a39; background: #0e1a16; margin-bottom: 20px;
+      }
+      .hero h1 {
+        font-size: clamp(2.2rem, 5.4vw, 3.6rem); line-height: 1.08; margin: 0 0 20px;
+        letter-spacing: -0.03em;
+      }
+      .hero p { font-size: 19px; color: #93a1b3; margin: 0 0 30px; max-width: 62ch; }
+      .cta {
+        display: inline-block; padding: 13px 24px; border-radius: 8px;
+        background: #4ade9b; color: #06120c; text-decoration: none; font-size: 15px;
+        font-weight: 650;
+      }
+      .cta.ghost {
+        background: transparent; color: #e9edf2; border: 1px solid #263141; margin-left: 10px;
+      }
+      section { padding: 0 6vw 9vh; max-width: 980px; }
+      h2 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.01em; }
+      .sub { color: #93a1b3; font-size: 15px; margin: 0 0 22px; }
+      table { border-collapse: collapse; width: 100%; background: #0e131a; border-radius: 10px; }
+      th, td {
+        text-align: left; padding: 13px 16px; border-bottom: 1px solid #1b222c; font-size: 15px;
+      }
+      th {
+        font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: #7b8a9d;
+        font-weight: 600;
+      }
+      tr:last-child td { border-bottom: 0; }
+      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+      .free { color: #4ade9b; }
+      .none { color: #7b8a9d; }
+      .rates { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+      .rate {
+        border: 1px solid #1b222c; border-radius: 12px; padding: 20px; background: #0e131a;
+      }
+      .rate.pick { border-color: #1f4a39; background: #0d1714; }
+      .rate h3 { margin: 0 0 4px; font-size: 15px; color: #93a1b3; font-weight: 600; }
+      .rate .big {
+        font-size: 30px; font-weight: 660; letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+      }
+      .rate .per { color: #7b8a9d; font-size: 13px; }
+      .rate p { margin: 12px 0 0; font-size: 14px; color: #93a1b3; }
+      footer {
+        padding: 26px 6vw; border-top: 1px solid #1b222c; font-size: 13px; color: #7b8a9d;
+      }
+      .built { margin-top: 8px; font-size: 12px; color: #55606f; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">Tessera<span>Compute</span></div>
+      <nav>
+        <a href="#capacity">Capacity</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#docs">Docs</a>
+        <a href="#contact">Contact</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="kicker">H100 · A100 · InfiniBand</span>
+      <h1>GPUs by the hour, up in ninety seconds.</h1>
+      <p>
+        No quota request, no sales cycle, no egress bill. Take sixty-four nodes for a week and
+        give them back. CUDA, PyTorch and NCCL are already configured when the node comes up.
+      </p>
+      <a class="cta" href="#pricing">See the rate card</a>
+      <a class="cta ghost" href="#capacity">What's free now</a>
+    </div>
+
+    <section id="capacity">
+      <h2>Available now</h2>
+      <p class="sub">
+        Live capacity, updated continuously. We do not quote what we cannot give you today.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Region</th>
+            <th>Card</th>
+            <th>Interconnect</th>
+            <th class="num">Free now</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>us-east-2</td>
+            <td class="mono">H100 80GB SXM</td>
+            <td>3.2 Tb/s InfiniBand</td>
+            <td class="num free">128 GPUs</td>
+          </tr>
+          <tr>
+            <td>eu-west-1</td>
+            <td class="mono">H100 80GB SXM</td>
+            <td>3.2 Tb/s InfiniBand</td>
+            <td class="num free">64 GPUs</td>
+          </tr>
+          <tr>
+            <td>eu-west-1</td>
+            <td class="mono">A100 80GB</td>
+            <td>1.6 Tb/s</td>
+            <td class="num free">200 GPUs</td>
+          </tr>
+          <tr>
+            <td>ap-south-1</td>
+            <td class="mono">H100 80GB SXM</td>
+            <td>3.2 Tb/s InfiniBand</td>
+            <td class="num none">waitlist</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="pricing">
+      <h2>Per GPU-hour</h2>
+      <p class="sub">Billed per second of node time. Storage and transfer are included.</p>
+      <div class="rates">
+        <div class="rate">
+          <h3>On-demand</h3>
+          <div class="big">$3.60</div>
+          <div class="per">per GPU-hour</div>
+          <p>H100 80GB. No commitment, stop whenever. Per-second billing.</p>
+        </div>
+        <div class="rate pick">
+          <h3>Reserved</h3>
+          <div class="big">$2.40</div>
+          <div class="per">per GPU-hour</div>
+          <p>Same hardware, one month or more. About a third below on-demand.</p>
+        </div>
+        <div class="rate">
+          <h3>Cluster</h3>
+          <div class="big">Quoted</div>
+          <div class="per">32 nodes and up</div>
+          <p>Dedicated interconnect and a named engineer. Talk to us.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="docs">
+      <h2>Start in one command</h2>
+      <p class="sub">
+        A node comes up with the drivers, the runtime and the collectives library already
+        matched. Nothing to build.
+      </p>
+      <table>
+        <tbody>
+          <tr>
+            <td class="mono">tessera up --gpus 8 --card h100 --region eu-west-1</td>
+            <td class="num none">~90s</td>
+          </tr>
+          <tr>
+            <td class="mono">tessera scp ./train ~ &amp;&amp; tessera run torchrun train.py</td>
+            <td class="num none">your code</td>
+          </tr>
+          <tr>
+            <td class="mono">tessera down</td>
+            <td class="num none">billing stops</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer id="contact">
+      Tessera Compute · us-east-2, eu-west-1, ap-south-1 · support answered by a human 24/7
+      <div class="built">
+        An invented company, built to demonstrate an embedded sales agent. The agent in the
+        corner is real.
+      </div>
+    </footer>
+
+    <!--
+      THE ENTIRE INTEGRATION. Two kilobytes, one attribute, and the key is public by design: it
+      names which published agent should answer and authorises nothing at all. `demo-embed.py`
+      mints it and writes it in here.
+    -->
+    <script src="/embed.js" data-key="rk_aGiT71vCDJ3P2-OjUa1UJl-pb2BiRnPg" defer></script>
+  </body>
+</html>

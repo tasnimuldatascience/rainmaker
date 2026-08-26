@@ -2,12 +2,12 @@
 
 # Rainmaker
 
-**A sales tool that keeps working when the internet does not.**
+**An AI sales agent that runs the whole first call — and closes it.**
 
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-414%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-473%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -20,40 +20,56 @@
 
 ## What is this?
 
-**Give it your work email and it runs your first sales call.** It reads your company's website
-while you watch, opens your own pages and talks you through them, books a meeting in a real
-calendar, and shows you a price — then writes the whole thing into the pipeline.
+**A buyer lands on your website at eleven at night and nobody is awake.** Today they fill in a
+form and wait two days for a rep. Rainmaker answers them instead — out loud, immediately, with
+your product on the screen.
+
+Give it your name, work email and company, and it runs a real sales call: it reads your business
+before it speaks, works out what you need, drives its own product on screen while it talks you
+through it, compares itself against what else you are looking at, quotes your number, and puts a
+checkout in front of you. If the deal genuinely needs a person, it books one out of a real
+calendar. **Nobody is waiting in a queue behind it, because there is nobody behind it.**
 
 **That call is also the product.** Rainmaker sells the agent to other businesses, who configure
-their own and put it on their own website. Ours is simply the first one.
+their own and put it on their own website. Ours is simply the first row in the table.
 
 | Part | What it does |
 |---|---|
 | **The call** | An AI account executive you can type to or talk to. She answers out loud with her mouth moving to her own voice, says she is an AI before anything else, and stops selling the moment you ask for a person |
-| **Research** | Reads a prospect's public website live, on screen, and only lets her state what it actually found |
-| **Tools** | A calendar, a CRM, a browser and a mailbox — reached over MCP, so a customer's own systems drop in |
-| **Sales dashboard** | Where reps track their deals — **and it works with no internet at all** |
+| **Research** | Reads the buyer's company from the domain in their work email — live, on screen — and only lets her state what it actually found |
+| **The demo** | Drives the *seller's* product in a real browser while she narrates it. The opposite direction from research, through the same tool |
+| **Closing** | A quote computed from published pricing, a comparison written by the tenant, and a hosted checkout. The agent never sees a card |
+| **Tools** | A calendar, a CRM, a browser, a mailbox and a payment provider — reached over MCP, so a customer's own systems drop in |
+| **Sales dashboard** | Where reps pick the deal up afterwards, with every call already on it |
 
 ---
 
-## The offline part is real
+## What a call actually does
 
-Not "shows you a cached page". **Turn off your wifi, reload the browser tab, and everything
-still works.** Your edits save. When the connection returns, they sync.
+Ten steps, and the agent is allowed to jump between them the moment the buyer says something
+that means it should:
 
-<div align="center">
-<img src="docs/img/offline.png" alt="Rainmaker running with the network disconnected" width="100%">
-<br>
-<sub>Taken with the network genuinely disconnected, then a full page reload. The badge shows
-<b>83 edits saved on the device</b>, waiting to sync.</sub>
-</div>
+| | Step | What is decided in code |
+|---|---|---|
+| 1 | **Research** | The domain from the work address. Facts only, each with the page it came from |
+| 2 | **Introduce** | The AI disclosure, verbatim, before anything else. Not switchable off |
+| 3 | **Understand** | — the model's job, on a turn budget, because small models discover forever |
+| 4 | **Show** | Which page of the product opens, and where it scrolls to |
+| 5 | **Compare** | Every line of the comparison, quoted from what the tenant wrote |
+| 6 | **Quote** | Seats, rate, discount, total — arithmetic, and the sentence that says them |
+| 7 | **Close** | — the model's job |
+| 8 | **Checkout** | The amount, and the refusal above the ceiling a person has to sign off |
+| 9 | **Book a person** | The times, read from the calendar verbatim, and the confirmation |
+| 10 | **Write it down** | The CRM record, the outcome, and the follow-up draft |
 
-Why this is hard: the first version of that screenshot script failed with
-`ERR_INTERNET_DISCONNECTED`. The app could not even start after a reload. All the clever syncing
-in the world is useless if the page refuses to open.
+Steps 3 and 7 are the model's. Everything else is a decision the model is not consulted about,
+and [the reason](#the-graph-decides-the-model-writes) is that Qwen2.5-1.5B is a good enough
+writer for a discovery question and nowhere near reliable enough to confirm a meeting or name a
+price.
 
-**Try it yourself:** run it, drag a deal card between columns, turn off your wifi, keep working.
-There is no spinner and no "failed to save" message, because there is no request that can fail.
+**Work email, required.** The domain *is* the cold start — it is where the browser points before
+she says a word — and it is also the qualifying question. A refusal is a sentence explaining why,
+under the field that caused it.
 
 ---
 
@@ -71,7 +87,8 @@ uvicorn rainmaker.app:app --app-dir services/api/src --port 8000
 npm run dev            # http://localhost:5173
 ```
 
-Then **turn off your wifi and keep working.** That is the demo.
+Open it, give her a work email, and talk. **That is the demo** — everything in the table above
+happens on that call, with no key, no account and nothing paid for.
 
 ### Giving her the local brain and voice
 
@@ -94,20 +111,38 @@ python scripts/fetch-lipsync.py     # Wav2Lip, 436MB. Read the licence prompt �
 
 Restart the API and `/api/calls/health` will say what loaded. So will the console.
 
-The four tool servers need no setup — the API starts them itself, and the calendar and CRM work
-offline like the rest of the console.
+The five tool servers need no setup — the API starts them itself. The calendar and CRM keep
+working with no network, and payments run against a local mock provider that a clone can click
+all the way through.
 
 Optional, and everything works without them:
 
 ```bash
 FIRECRAWL_API_KEY=fc-…     # use the real research API instead of the built-in browser
+STRIPE_SECRET_KEY=sk_…     # take real money instead of the local mock checkout
 OUR_CATEGORY="vector search,learning-to-rank"   # rank job posts mentioning these highest
 RAINMAKER_VOICE=browser    # force the fallback voice, to hear the difference
+RAINMAKER_MAX_CHARGE=…     # the ceiling above which a person has to sign, in minor units
 ```
 
 ---
 
-## How the offline part works
+## The dashboard works with no internet
+
+Not "shows you a cached page". **Turn off your wifi, reload the browser tab, and everything still
+works.** Edits save. When the connection returns, they sync.
+
+<div align="center">
+<img src="docs/img/offline.png" alt="Rainmaker running with the network disconnected" width="100%">
+<br>
+<sub>Taken with the network genuinely disconnected, then a full page reload. The badge shows
+<b>83 edits saved on the device</b>, waiting to sync.</sub>
+</div>
+
+This is a property of the pipeline board, not a pitch: a rep on a train should be able to work
+the deals the agent filled the board with. The interesting engineering is below.
+
+### How it works
 
 Normally, saving something means asking a server and waiting. If the server cannot be reached,
 you get an error and your work is stuck.
@@ -194,25 +229,45 @@ and the page limit counts *attempts* rather than successes.
 
 <img src="docs/img/call.png" alt="Liv mid-call, screen-sharing the prospect's own pricing page" width="100%">
 
-That is one screenshot of one real call. The email `dana.whitfield@stripe.com` went in; everything
-after it happened by itself.
+That is one screenshot of one real call. `dana.whitfield@stripe.com` went into the form;
+everything after it happened by itself.
 
-**1 — She reads their site before she says a word.** Not a lookup: a browser opens their pages and
-pulls out facts with the page each came from.
+**1 — She reads their business before she says a word.** Not a lookup: a browser opens the pages
+behind their email domain and pulls out facts, each with the page it came from.
 
 <img src="docs/img/research-live.png" alt="Nine facts read live from stripe.com" width="100%">
 
-**2 — Then she shows them their own website.** That screenshot at the top is stripe.com/pricing,
-opened live and narrated. The browsing is not a background job — it is the demo, because reading a
-prospect's site before a call is the work she is replacing.
+**2 — Then she drives the product.** A real browser opens *our* pages — not theirs — scrolled to
+the thing she is about to talk about, and she narrates what is on the screen against the problem
+they just described.
 
-**3 — She books out of a real calendar.**
+Those two steps use the same browser tool in opposite directions, and confusing them is a real
+mistake with a real cost: for a while the demo consisted of narrating the prospect's own homepage
+back at them. The prompt now names both companies and says which one owns the page on screen.
+
+**3 — She is fair about the competition.** Every line of the comparison is quoted from what the
+tenant wrote. A comparison table a language model composed about a named competitor is a
+defamation risk with a grid layout.
+
+**4 — Then her number.** Seats from what they said, rate and discount from published pricing,
+computed in code — and the sentence that states it is written in code too, the way the calendar
+writes its own times. The model is told the figure is already said and asked to do the one thing
+it is good at: ask whether it works.
+
+**5 — And a checkout.** A hosted page on the payment provider's domain. The agent never sees a
+card, which is what keeps card data out of this product entirely rather than in it and managed.
+
+**6 — A person, if the deal actually needs one.**
 
 <img src="docs/img/booking.png" alt="Real availability, offered and booked" width="100%">
 
-**4 — Then the price**, sized to what she found, on screen and never spoken. And the whole call is
-written into the pipeline as CRDT ops through the CRM tool server, so a rep's laptop sees it like
-any other edit.
+This is the escalation, not the goal — the whole point is that nobody waits for a rep. Ask for a
+human and she stops selling on the spot; what follows the fixed line is a diary rather than a
+promise.
+
+The whole call is then written into the pipeline as CRDT ops through the CRM tool server, so a
+rep's laptop sees it like any other edit — **including the calls that ended because somebody
+closed the tab**, which is most of them.
 
 ### The graph decides, the model writes
 
@@ -236,15 +291,26 @@ Ask for a human and she stops selling immediately — one fixed line, and the mo
 consulted about whether to agree. She is also held to two sentences a turn in code: asked
 politely, the model wrote four to six every time and got cut off mid-word by the token limit.
 
+**And the model cannot say a price at all**, which is enforced in the token stream rather than
+requested in the prompt. That distinction was not academic: asked what capacity was available,
+Qwen answered *"starting from $50 per GPU per hour"* about a product whose rate card says $2.40.
+Every other part of the design was already right — the quote is arithmetic, the sentence stating
+it is written in code, the prompt says the figure has already been read out — and none of it
+mattered, because nothing was checking. A figure now never reaches synthesis: it is replaced,
+mid-stream, before it can be spoken. The platform's own computed sentences do not pass through
+that filter, which is the whole distinction — **the platform may state a number it worked out,
+and the model may not state one at all.**
+
 ### Her tools are a protocol, not an integration
 
-Four MCP servers, each runnable on its own in any MCP host:
+Five MCP servers, each runnable on its own in any MCP host:
 
 ```bash
 python -m rainmaker.mcp.servers.calendar    # availability, booking, cancellation
 python -m rainmaker.mcp.servers.crm         # call outcomes, as CRDT ops
 python -m rainmaker.mcp.servers.research    # a page's text, and a picture of it
-python -m rainmaker.mcp.servers.email       # the follow-up. Off without SMTP
+python -m rainmaker.mcp.servers.email       # the follow-up. Drafts always; sends with SMTP
+python -m rainmaker.mcp.servers.payments    # hosted checkout. Mock until a key says otherwise
 ```
 
 They run as separate processes so a third-party server that hangs cannot take a live call with
@@ -253,6 +319,28 @@ is a line in `mcp.toml` — the point of building it this way rather than as a f
 
 The calendar will not sell the same slot twice, and that is enforced by a unique index rather
 than by code, because listing times and booking one are separated by a conversation.
+
+### Taking the money without touching a card
+
+The agent asks the payment server for a hosted checkout built from the quote object and shows the
+link. The card is entered on the processor's page, on the processor's domain, in the buyer's own
+browser. **Nothing in this repository, in the model's context, or in a transcript ever contains a
+card number** — which keeps the product out of PCI scope rather than putting it in and managing
+it, and is why the tools have no parameter that could carry one.
+
+Two rules the code enforces rather than asks for:
+
+| | |
+|---|---|
+| **The amount is arithmetic** | It comes from `Quote`, which multiplies published pricing by a seat count the conversation established. An agent that invents a meeting wastes a slot; an agent that invents an amount takes somebody's money |
+| **There is a ceiling** | Above it the tool refuses and hands back a sentence about getting a person, because an agent that can raise an unbounded charge is a headline |
+
+Without a key it runs a **mock provider**: a real page, a real record, a real `paid` state, and no
+money. That is deliberate — a payment step nobody can click through is a payment step nobody has
+debugged, and it is what the fifteen tests in `test_payments.py` run against. With
+`STRIPE_SECRET_KEY` set it creates real Checkout Sessions instead, and `mark_paid` starts
+refusing outright: there, the processor's webhook is the only thing allowed to say a checkout was
+paid.
 
 ### Why it does not pause awkwardly
 
@@ -314,12 +402,14 @@ console's badge says so. Nothing is faked to cover the gap.
 
 ## The same agent, on someone else's website
 
-<img src="docs/img/embed.png" alt="A dental practice's own agent, on their own site" width="100%">
+<img src="docs/img/embed.png" alt="A GPU cloud's own agent, on their own site" width="100%">
 
-That is not our console. It is a dental practice's website — different fonts, different colours,
-nothing shared — and the agent in the corner is **theirs**: their name, their voice, their face,
-their disclosure wording, and only the calendar tool granted. It quotes forty-five pounds because
-their price list says forty-five pounds.
+That is not our console. It is a GPU cloud's website — different fonts, different colours, nothing
+shared — and the agent in the corner is **theirs**: their name, their voice, their face, their
+disclosure wording, their competitors, and no email server granted. It quotes **$2.40 per
+GPU-hour** because their rate card says $2.40 per GPU-hour, and the word *GPU-hour* comes from
+their pricing rather than from our platform, which called everything a seat until a tenant sold
+something else.
 
 The entire integration is one tag:
 
@@ -335,18 +425,27 @@ and a tag manager, and because microphone permission should be scoped to us rath
 
 ```python
 AgentSpec(
-    tenant="northgate", agent_id="alex",
-    name="Alex", company="Northgate Dental", voice="male-warm",
-    knowledge=(Fact("A routine check-up is forty-five pounds…", source="price list"),),
-    tools=("calendar",),          # no research agent: a dentist has no use for one
-    guardrails=Guardrails(disclosure="…I'm an automated assistant, not a person."),
+    tenant="tessera", agent_id="alex",
+    name="Alex", company="Tessera Compute", voice="male-warm",
+    knowledge=(Fact("H100s by the hour, in clusters of up to 64…", source="positioning"),),
+    pricing=(Tier("Reserved", "$2.40 / GPU-hour", unit_amount=240, unit_name="GPU-hour"),),
+    competitors=(Competitor(name="a hyperscaler", …),),
+    tools=("calendar", "crm", "research", "payments"),   # no email server: not granted, not reachable
+    guardrails=Guardrails(disclosure="Quick thing first — I'm an AI, not a person…"),
 )
 ```
+
+That agent runs all ten steps of the call on a business nothing like ours — hours instead of
+seats, engineers instead of sales teams — which is a stronger claim than a second SaaS company
+with our shape and a different logo. It is also where the research step earns its keep: their
+buyer is identifiable from a careers page, so "I saw you're hiring two ML engineers" is a real
+buying signal for compute rather than a party trick.
 
 Versions are immutable and publishing is a pointer move, so rolling back a bad change is one
 call and a publish cannot alter an agent underneath somebody mid-conversation with it.
 
-**What a tenant may change** — name, persona, objective, voice, face, knowledge, prices, and how
+**What a tenant may change** — name, persona, objective, voice, face, knowledge, prices and the
+unit they are priced in, competitors, the tour, which fields the front door asks for, and how
 each step of the call is framed.
 
 **What they may not** — that the agent discloses it is an AI, that it hands over when asked for a
@@ -388,11 +487,11 @@ worse than the call it prevented.
 ## Tests
 
 ```bash
-npm test                       # 51 tests — syncing, text editing, the call surface
-pytest                         # 363 tests — research, syncing, the API, the live call, the tools
+npm test                       # 53 tests — syncing, text editing, the call surface
+pytest                         # 420 tests — research, syncing, the API, the live call, the tools
 ```
 
-414 tests in total. None of them load a language model: a test that spends six seconds on
+473 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
@@ -402,9 +501,10 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `test_research.py` | The research agent cannot invent facts, wander onto other websites, or read more pages than allowed |
 | `test_sync.py` | Duplicate changes, saving before broadcasting, slow clients, and TypeScript ↔ Python agreement |
 | `test_app.py` | **The offline flush endpoint.** Reconnect, retry, deduplicate, and never half-apply a batch |
-| `test_pipeline.py` | That a call cannot start without the AI disclosure, and that every stage of the turn is measured |
+| `test_pipeline.py` | That a call cannot start without the AI disclosure, that every stage of the turn is measured, and that a price the model invented never reaches the speaker |
 | `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
-| `test_agenda.py` | That she researches before she greets, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
+| `test_agenda.py` | That she researches before she greets, that the page she opens is ours and not theirs, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
+| `test_payments.py` | That the amount comes from the quote and not the conversation, that nothing above the ceiling goes through without a person, and that there is no parameter anywhere that could carry a card number |
 | `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, and that she will not email anyone who was not on the call |
 | `test_admission.py` | Who may start a call once the agent is on a stranger's website, and that every refusal is a sentence rather than a status code |
 | `test_agents.py` | The line between what a customer may configure and what the platform enforces — a tenant who can switch off the AI disclosure is a liability the vendor inherits |
@@ -469,14 +569,19 @@ packages/crdt          the offline-syncing data structures     (TypeScript)
 apps/console           the dashboard and the call surface       (React)
 services/api
   calls/
-    intake.py          an email address becomes a domain to research
+    intake.py          name, work email and company become a domain to research
     agenda.py          the plot: which step, which tool, which words are fixed
     pipeline.py        the turn loop, the latency budget, the disclosure
     providers.py       the local model and the local voice
     avatar.py          which face is on screen, and what it admits to
+    admission.py       who may start a call once the agent is on a stranger's site
+  agents/
+    spec.py            what a tenant may configure, and what they may not
+    quoting.py         seats, rate, discount, total — and the sentence that says them
+    store.py           versioned specs; publishing is a pointer move
   mcp/
     client.py          spawns the tool servers, routes calls, enforces deadlines
-    servers/           calendar, crm, research, email — each runnable on its own
+    servers/           calendar, crm, research, email, payments — each runnable alone
   research/            reading websites and extracting facts
   sync/                collecting and relaying changes
   crm/                 turning changes into a readable view

@@ -4,17 +4,28 @@
     python scripts/demo-embed.py
 
 WHAT THIS DEMONSTRATES, and it is the thing the rest of the repository is in service of:
-Rainmaker sells the agent to other businesses. Running this publishes a dental practice's agent
-— their name, their voice, their prices, their disclosure wording, and only the calendar tool
-granted — then pastes its public key into `demo/northgate.html`, a page that shares no
-stylesheet, font or colour with our console.
+Rainmaker sells the agent to other businesses. Running this publishes a GPU cloud's agent — their
+name, their voice, their pitch, their prices, their disclosure wording, their competitors, their
+tour — then pastes its public key into `demo/tessera.html`, a page that shares no stylesheet,
+font or colour with our console.
 
-Open that page and the agent in the corner is theirs. It quotes forty-five pounds because their
-price list says so, not because ours does.
+Open that page and the agent in the corner is theirs. It quotes two dollars forty an hour because
+their price list says so, not because ours does.
 
-The key is minted by the store rather than chosen, which is why the HTML ships with a
-placeholder and this script fills it in. It is public either way — it sits in the page source of
-a customer's marketing site, it selects a published agent, and it authorises nothing.
+WHY A GPU CLOUD AND NOT THE DENTIST THIS REPLACED. The dental practice proved a tenant could
+switch things OFF — no research, calendar only — and proved nothing about the product, because a
+patient with toothache has no company to research, no seats to quote and no card to enter. It
+exercised one step of ten. Tessera runs all ten, and it runs them on a business that is nothing
+like ours: hours instead of seats, engineers instead of sales teams, a commitment discount
+instead of an annual one.
+
+IT ALSO MAKES THE RESEARCH STEP MEAN SOMETHING. Their buyer is identifiable from a careers page —
+a company hiring ML engineers and mentioning training runs is a company that needs GPUs next
+quarter — so the agent's opening line is a real buying signal rather than a party trick.
+
+The key is minted by the store rather than chosen, which is why the HTML ships with a placeholder
+and this script fills it in. It is public either way — it sits in the page source of a customer's
+marketing site, it selects a published agent, and it authorises nothing.
 """
 
 from __future__ import annotations
@@ -26,83 +37,190 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services" / "api" / "src"))
 
-PAGE = ROOT / "apps" / "console" / "public" / "demo" / "northgate.html"
+PAGE = ROOT / "apps" / "console" / "public" / "demo" / "tessera.html"
 
-from rainmaker.agents.spec import AgentSpec, Fact, Guardrails, Tier  # noqa: E402
+from rainmaker.agents.spec import (  # noqa: E402
+    AgentSpec,
+    Competitor,
+    Fact,
+    Guardrails,
+    Tier,
+    TourStop,
+)
 from rainmaker.agents.store import AgentStore  # noqa: E402
 
-TENANT, AGENT = "northgate", "alex"
+TENANT, AGENT = "tessera", "alex"
+
+#: Where their own tour opens. Their site, not ours — the whole point of the guide step.
+SITE = "http://localhost:5173/demo/tessera.html"
 
 
-def northgate() -> AgentSpec:
-    """A dental practice's agent, configured exactly the way a customer would configure one."""
+def tessera() -> AgentSpec:
+    """A GPU cloud's agent, configured exactly the way a customer would configure one."""
     return AgentSpec(
         tenant=TENANT,
         agent_id=AGENT,
         name="Alex",
-        company="Northgate Dental",
-        persona="a calm, unhurried dental receptionist who never rushes anybody",
-        objective="Find out what is bothering them and get them booked in.",
+        company="Tessera Compute",
+        persona="a straight-talking solutions engineer who would rather be exact than keen",
+        objective=(
+            "Work out what they are training and how much of it, show them the capacity and "
+            "what it costs, and either get them started on a card or get them a time with an "
+            "engineer."
+        ),
         voice="male-warm",
         portrait="/agent/alex.jpg",
         knowledge=(
             Fact(
-                "A routine check-up is forty-five pounds, including examination and polish.",
+                "Tessera rents H100 and A100 GPUs by the hour, in clusters of up to 64, with "
+                "no minimum term.",
+                source="positioning",
+            ),
+            Fact(
+                "Capacity is live on the pricing page: what is free right now, in which region, "
+                "and what it costs. Nothing is quoted that is not available.",
+                source="positioning",
+            ),
+            Fact(
+                "Nodes come up in about ninety seconds with CUDA, PyTorch and NCCL already "
+                "configured, so a training run starts the same afternoon it is paid for.",
+                source="product",
+                topic="setup",
+            ),
+            Fact(
+                "Storage is a shared NVMe volume mounted on every node in a cluster. Ingress "
+                "and egress are not charged for.",
+                source="product",
+                topic="storage",
+            ),
+            Fact(
+                "Teams committing to a month or more get the reserved rate, which is about a "
+                "third below on-demand.",
                 source="price list",
                 topic="pricing",
             ),
             Fact(
-                "A hygienist appointment is sixty pounds for thirty minutes.",
+                "Interconnect is 3.2 terabits per second InfiniBand within a cluster, which is "
+                "what makes multi-node training worth doing at all.",
+                source="product",
+                topic="performance",
+            ),
+            Fact(
+                "Most teams arrive because their cloud quota request has been pending for weeks "
+                "and a model is not training in the meantime.",
+                source="the problem",
+                topic="why",
+            ),
+            Fact(
+                "Billing is per second of node time, stops when the node does, and never has a "
+                "control-plane fee on top.",
                 source="price list",
                 topic="pricing",
             ),
-            Fact(
-                "A white filling is between one hundred and twenty and one hundred and eighty "
-                "pounds, quoted after an examination.",
-                source="price list",
-                topic="pricing",
+        ),
+        tour=(
+            TourStop(
+                url=f"{SITE}#capacity",
+                label="what is free right now",
+                shows=(
+                    "live capacity by region and card, with the hourly rate next to each one, "
+                    "so the number being discussed is one they can see"
+                ),
+                scroll_to="Available now",
+                answers=("capacity", "available", "region", "h100", "a100", "what do you have"),
             ),
-            Fact(
-                "We are open Monday to Friday, eight thirty until six. Closed at weekends.",
-                source="opening hours",
+            TourStop(
+                url=f"{SITE}#pricing",
+                label="the rate card",
+                shows=(
+                    "on-demand against reserved, per GPU-hour, with what the commitment "
+                    "actually buys"
+                ),
+                scroll_to="Per GPU-hour",
+                answers=("price", "pricing", "cost", "rate", "how much", "reserved"),
             ),
-            Fact(
-                "For an emergency we keep same-day slots. Out of hours, call one one one.",
-                source="emergency policy",
+        ),
+        competitors=(
+            Competitor(
+                name="a hyperscaler",
+                positioning=(
+                    "everything in one account, and the compliance paperwork already done"
+                ),
+                against=(
+                    ("waiting", "give you nodes today rather than a quota request in a queue"),
+                    ("price", "cost about half per GPU-hour at the reserved rate"),
+                    ("egress", "not charge you to get your own weights back out"),
+                ),
             ),
-            Fact(
-                "We take both NHS and private patients, and have been on Northgate for "
-                "thirty-one years.",
-                source="about page",
+            Competitor(
+                name="buying your own boxes",
+                positioning=(
+                    "the cheapest possible hour, if you can keep them busy and someone racks "
+                    "them"
+                ),
+                against=(
+                    ("time to start", "be training this afternoon rather than next quarter"),
+                    ("bursts", "let you take 64 nodes for a week and give them back"),
+                    ("who fixes it", "replace a failed card without it being your problem"),
+                ),
             ),
         ),
         pricing=(
-            Tier("Check-up", "£45", "examination and polish"),
-            Tier("Hygienist", "£60", "30 minutes"),
-            Tier("White filling", "£120–£180", "quoted after examination"),
+            Tier(
+                "On-demand",
+                "$3.60 / GPU-hour",
+                "H100, no commitment, per-second billing",
+                unit_amount=360,
+                min_seats=1,
+                unit_name="GPU-hour",
+            ),
+            Tier(
+                "Reserved",
+                "$2.40 / GPU-hour",
+                "H100, one month or more, same hardware",
+                unit_amount=240,
+                min_seats=500,
+                unit_name="GPU-hour",
+            ),
+            Tier("Cluster", "quoted", "32 nodes and up, dedicated interconnect"),
         ),
-        pricing_note="From our published price list. A dentist confirms after examining you.",
-        # ONLY THE CALENDAR. A dental practice has no use for a research agent that reads a
-        # prospect's website, and an agent that can reach a tool nobody needs is a tool nobody
-        # is watching.
-        tools=("calendar",),
+        pricing_note="Per GPU-hour, billed per second. Reserved needs a month's commitment.",
+        pricing_period="month",
+        currency="usd",
+        # NOT AN ANNUAL DISCOUNT. Their commitment discount is already the difference between
+        # two tiers, and stacking a second one on top would quote a number their price list
+        # does not contain.
+        annual_discount_pct=0,
+        # NO EMAIL SERVER. Their follow-up goes through their own system, so the tool is not
+        # granted and the agent cannot reach for it — which is the point of an allow-list.
+        tools=("calendar", "crm", "research", "payments"),
         step_objectives=(
-            ("discovery", "Find out what is bothering them, and for how long."),
-            ("proposing", "Suggest the appointment that fits what they described. One sentence."),
+            (
+                "discovery",
+                "Find out what they are training, on what, and what is blocking them today.",
+            ),
+            (
+                "guide",
+                "Show live capacity and say what it would run. Never promise a card that is "
+                "not on the page.",
+            ),
         ),
         guardrails=Guardrails(
             disclosure=(
-                "Hello — before we go on, I should say I'm an automated assistant, not a person. "
-                "I can book you in, and I'll put you through to reception whenever you like."
+                "Quick thing first — I'm an AI, not a person. I can size a cluster, quote it and "
+                "get you started, and I'll bring in an engineer whenever you want one."
             ),
-            handoff_line="Of course, I'll put you through to reception now.",
+            handoff_line=(
+                "Sure — let me get one of our engineers on this with you. I'll pass along "
+                "everything we've covered."
+            ),
         ),
     )
 
 
 def main() -> int:
     store = AgentStore()
-    saved = store.save(northgate())
+    saved = store.save(tessera())
     live = store.publish(TENANT, AGENT, saved.version)
     store.close()
 
@@ -120,7 +238,7 @@ def main() -> int:
     PAGE.write_text(wired, encoding="utf-8")
 
     print(f"\nwired into {PAGE.relative_to(ROOT)}")
-    print("open http://localhost:5173/demo/northgate.html — the agent in the corner is theirs")
+    print(f"open {SITE} — the agent in the corner is theirs")
     return 0
 
 

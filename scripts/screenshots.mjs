@@ -48,6 +48,32 @@ async function shot(name, prepare, settleMs = 600) {
 
 const setTheme = (t) => page.evaluate((v) => (document.documentElement.dataset.theme = v), t);
 
+/**
+ * Fill the front door and start a call.
+ *
+ * THREE FIELDS NOW, and `fill(".intake input")` would match all of them — Playwright's strict
+ * mode turns that into an error rather than a wrong screenshot, which is the good outcome, but
+ * it still has to be written once rather than in five shots.
+ */
+async function startCall(p) {
+  await p.click('.nav button:has-text("Live call")');
+  await p.fill('.intake input[autocomplete="name"]', "Dana Whitfield");
+  await p.fill('.intake input[type="email"]', "dana.whitfield@stripe.com");
+  await p.fill('.intake input[autocomplete="organization"]', "Stripe");
+  await p.click('button:has-text("Start the call")');
+}
+
+/** Wait until she has said three things: the disclosure, the holding line, and the greeting. */
+const greeted = (p) =>
+  p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
+    timeout: 120000,
+  });
+
+const say = async (p, text) => {
+  await p.fill(".composer input", text);
+  await p.click('button:has-text("Send")');
+};
+
 await shot("pipeline-dark", async () => setTheme("dark"));
 await shot("pipeline-light", async () => setTheme("light"));
 
@@ -65,22 +91,16 @@ await shot("research", async (p) => {
 
 await shot("call", async (p) => {
   await setTheme("dark");
-  await p.click('.nav button:has-text("Live call")');
-
-  // The front door is an email, not a button: everything she knows before she speaks comes from
-  // the domain in it, so the shot has to start the way the product does.
-  await p.fill(".intake input", "dana.whitfield@stripe.com");
-  await p.click('button:has-text("Start the call")');
+  // The front door is a form, not a button: everything she knows before she speaks comes from
+  // the domain in that address, so the shot has to start the way the product does.
+  await startCall(p);
 
   // She discloses, reads their site, then greets using something she found. Three turns.
-  await p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
-    timeout: 120000,
-  });
+  await greeted(p);
 
   // Then ask to see it, so the shot shows the thing that makes this a demo rather than a chat:
-  // the prospect's OWN page, opened live, with Liv over it.
-  await p.fill(".composer input", "show me what it looks like");
-  await p.click('button:has-text("Send")');
+  // OUR product, driven live in a real browser, with Liv talking over it.
+  await say(p, "show me what it looks like");
   await p.waitForSelector(".screen-frame", { timeout: 120000 });
 
   // Wait for a frame where she is AUDIBLY speaking: `--loud` is the RMS of the audio playing at
@@ -103,25 +123,39 @@ await shot("call", async (p) => {
 // the research and the booking are the parts a reader does not believe without seeing.
 await shot("research-live", async (p) => {
   await setTheme("dark");
-  await p.click('.nav button:has-text("Live call")');
-  await p.fill(".intake input", "dana.whitfield@stripe.com");
-  await p.click('button:has-text("Start the call")');
+  await startCall(p);
   await p.waitForSelector(".fact-list li", { timeout: 120000 });
 }, 400);
 
 await shot("booking", async (p) => {
   await setTheme("dark");
-  await p.click('.nav button:has-text("Live call")');
-  await p.fill(".intake input", "dana.whitfield@stripe.com");
-  await p.click('button:has-text("Start the call")');
-  await p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
-    timeout: 120000,
-  });
-  await p.fill(".composer input", "can we book something");
-  await p.click('button:has-text("Send")');
+  await startCall(p);
+  await greeted(p);
+  await say(p, "can we book something");
   await p.waitForSelector(".slot", { timeout: 120000 });
   await p.click(".slot");
   await p.waitForSelector(".big-tick", { timeout: 120000 });
+}, 400);
+
+// The two panels that make it a closing agent rather than a lead form: their number, and a
+// checkout for it. Both figures are computed on the server, so what is captured here is the
+// same arithmetic a buyer would agree to.
+await shot("quote", async (p) => {
+  await setTheme("dark");
+  await startCall(p);
+  await greeted(p);
+  await say(p, "how much would it be for 40 people?");
+  await p.waitForSelector(".quote-figure", { timeout: 120000 });
+}, 400);
+
+await shot("checkout", async (p) => {
+  await setTheme("dark");
+  await startCall(p);
+  await greeted(p);
+  await say(p, "how much would it be for 40 people?");
+  await p.waitForSelector(".quote-figure", { timeout: 120000 });
+  await say(p, "great, sign me up");
+  await p.waitForSelector('a:has-text("Open the checkout")', { timeout: 120000 });
 }, 400);
 
 // Consecutive frames of her face mid-sentence, for the README's lip-sync claim. Cropped to the
@@ -131,7 +165,9 @@ await shot("booking", async (p) => {
   await page.goto(BASE, { waitUntil: "networkidle" });
   await setTheme("dark");
   await page.click('.nav button:has-text("Live call")');
-  await page.fill(".intake input", "dana.whitfield@stripe.com");
+  await page.fill('.intake input[autocomplete="name"]', "Dana Whitfield");
+  await page.fill('.intake input[type="email"]', "dana.whitfield@stripe.com");
+  await page.fill('.intake input[autocomplete="organization"]', "Stripe");
   await page.click('button:has-text("Start the call")');
 
   const drawing = await page
