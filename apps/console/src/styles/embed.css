@@ -1,0 +1,82 @@
+/**
+ * The widget, inside a 390px iframe on somebody else's website.
+ *
+ * ITS OWN STYLESHEET, and its own class prefix. `app.css` is a console: a header bar, a grid,
+ * cards, a 56px chrome row. None of that is a chat panel, and reusing it here would mean every
+ * console change risking a customer's embed. What IS shared is the token layer at the top of
+ * `app.css` -- the colours and spacing -- so the two surfaces cannot drift apart on brand.
+ */
+
+.w-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  block-size: 100dvh;
+  background: var(--surface-1);
+  color: var(--fg);
+  font-size: var(--t-md);
+}
+.w-centre { place-content: center; text-align: center; padding: var(--s-5); }
+
+.w-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s-3) var(--s-4);
+  border-block-end: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.w-who { display: flex; align-items: center; gap: var(--s-2); font-weight: 620; font-size: var(--t-sm); }
+.w-dot { inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--won); }
+.w-x {
+  border: 0; background: none; color: var(--fg-3); font-size: 22px; line-height: 1;
+  cursor: pointer; padding: 0 var(--s-2);
+}
+.w-x:hover { color: var(--fg); }
+
+/* The face is the top third and does not scroll. A talking head that slides out of view when
+   the transcript grows is a talking head nobody sees. */
+.w-face {
+  /* Tall enough that a square portrait cropped to `cover` still shows brow to chin. At 190 the
+     mouth sat on the bottom edge, which is a poor place for the part that moves. */
+  position: relative; block-size: 240px; overflow: hidden;
+  background: linear-gradient(170deg, var(--surface-3), var(--surface-1));
+}
+.w-face .portrait { inline-size: 100%; block-size: 100%; border-radius: 0; }
+.w-caption {
+  position: absolute; inset-inline: var(--s-3); inset-block-end: var(--s-3);
+  padding: var(--s-2) var(--s-3); border-radius: var(--r-md);
+  background: rgb(0 0 0 / 0.62); backdrop-filter: blur(6px);
+  font-size: var(--t-sm); line-height: 1.45;
+  max-block-size: 4.6rem; overflow: hidden;
+}
+
+.w-start { display: grid; gap: var(--s-3); padding: var(--s-5) var(--s-4); align-content: start; }
+.w-lead { font-size: var(--t-sm); color: var(--fg-2); line-height: 1.5; }
+.w-note { font-size: var(--t-xs); color: var(--fg-3); line-height: 1.5; }
+
+.w-log { overflow-y: auto; padding: var(--s-4); display: grid; gap: var(--s-3); align-content: start; }
+.w-turn {
+  font-size: var(--t-sm); line-height: 1.55; padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-md); max-inline-size: 88%;
+}
+.w-turn[data-who="agent"] { background: var(--surface-3); justify-self: start; }
+.w-turn[data-who="prospect"] { background: var(--accent-lo); color: #fff; justify-self: end; }
+.w-partial { opacity: 0.6; font-style: italic; justify-self: end; }
+
+.w-bar {
+  display: flex; gap: var(--s-2); padding: var(--s-3);
+  border-block-start: 1px solid var(--line); background: var(--surface-2);
+}
+.w-input {
+  flex: 1; min-inline-size: 0; padding: 10px var(--s-3); border-radius: var(--r-full);
+  background: var(--surface-1); border: 1px solid var(--line-strong); color: var(--fg);
+  font: inherit; font-size: var(--t-sm); outline: none;
+}
+.w-input:focus { border-color: var(--accent); }
+.w-go, .w-send, .w-mic {
+  border: 0; border-radius: var(--r-full); cursor: pointer; font: inherit; font-weight: 600;
+}
+.w-go { padding: 11px; background: var(--accent); color: #fff; font-size: var(--t-md); }
+.w-send { padding: 10px var(--s-3); background: var(--surface-3); color: var(--fg); font-size: var(--t-sm); }
+.w-send:disabled { opacity: 0.45; cursor: not-allowed; }
+.w-mic { padding: 10px var(--s-3); background: var(--surface-3); font-size: var(--t-md); touch-action: none; }
+.w-mic[data-on="true"] { background: color-mix(in oklab, var(--lost) 35%, transparent); }
+.w-mic:disabled { opacity: 0.4; cursor: not-allowed; }

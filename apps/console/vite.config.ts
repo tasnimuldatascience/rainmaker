@@ -25,5 +25,18 @@ export default defineConfig({
     port: 5174,
     proxy: { "/api": { target: "http://127.0.0.1:8000", changeOrigin: true, ws: true } },
   },
-  build: { outDir: "dist", sourcemap: true },
+  build: {
+    outDir: "dist",
+    sourcemap: true,
+    // TWO PAGES, ONE BUILD. `index.html` is the console a rep uses; `embed.html` is what loads
+    // inside an iframe on a customer's own website. Separate entries rather than one bundle
+    // with a flag: the widget must not carry the pipeline board, and the console must not be
+    // reshaped by the widget's stylesheet.
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("index.html", import.meta.url)),
+        embed: fileURLToPath(new URL("embed.html", import.meta.url)),
+      },
+    },
+  },
 });

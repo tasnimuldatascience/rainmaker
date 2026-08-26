@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-395%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-414%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -23,6 +23,9 @@
 **Give it your work email and it runs your first sales call.** It reads your company's website
 while you watch, opens your own pages and talks you through them, books a meeting in a real
 calendar, and shows you a price — then writes the whole thing into the pipeline.
+
+**That call is also the product.** Rainmaker sells the agent to other businesses, who configure
+their own and put it on their own website. Ours is simply the first one.
 
 | Part | What it does |
 |---|---|
@@ -309,6 +312,64 @@ console's badge says so. Nothing is faked to cover the gap.
 
 ---
 
+## The same agent, on someone else's website
+
+<img src="docs/img/embed.png" alt="A dental practice's own agent, on their own site" width="100%">
+
+That is not our console. It is a dental practice's website — different fonts, different colours,
+nothing shared — and the agent in the corner is **theirs**: their name, their voice, their face,
+their disclosure wording, and only the calendar tool granted. It quotes forty-five pounds because
+their price list says forty-five pounds.
+
+The entire integration is one tag:
+
+```html
+<script src="https://your-rainmaker/embed.js" data-key="rk_..." defer></script>
+```
+
+Two kilobytes, and it makes an iframe. Everything real — the socket, the audio graph, the face —
+runs on our origin inside that frame, because a marketing site is a pile of somebody else's CSS
+and a tag manager, and because microphone permission should be scoped to us rather than to them.
+
+### An agent is a row, not a release
+
+```python
+AgentSpec(
+    tenant="northgate", agent_id="alex",
+    name="Alex", company="Northgate Dental", voice="male-warm",
+    knowledge=(Fact("A routine check-up is forty-five pounds…", source="price list"),),
+    tools=("calendar",),          # no research agent: a dentist has no use for one
+    guardrails=Guardrails(disclosure="…I'm an automated assistant, not a person."),
+)
+```
+
+Versions are immutable and publishing is a pointer move, so rolling back a bad change is one
+call and a publish cannot alter an agent underneath somebody mid-conversation with it.
+
+**What a tenant may change** — name, persona, objective, voice, face, knowledge, prices, and how
+each step of the call is framed.
+
+**What they may not** — that the agent discloses it is an AI, that it hands over when asked for a
+person, that it may only state what its knowledge holds, that it can reach a tool nobody granted
+it. Those four are the difference between selling software and inheriting someone else's
+liability: when a buyer is told something untrue, the sentence in the complaint is *"the vendor's
+AI said it"*. Being unable to switch the disclosure off is also the answer to every customer's
+compliance review.
+
+### The visitor is a stranger
+
+Which changes the threat model completely, and is why the agent's knowledge is looked up
+server-side from the published spec rather than sent by the page. There used to be a message
+that let the client supply it — fine while the only client was our console, and an open door the
+moment the caller is the one holding the socket.
+
+Every call is admitted before anything expensive happens: concurrency against the GPU, hourly
+caps per visitor and per agent, and limits on turns and duration for the tab somebody walked
+away from. Every refusal carries a sentence, because a `429` on a dental practice's homepage is
+worse than the call it prevented.
+
+---
+
 ## The dashboard
 
 <table>
@@ -328,10 +389,10 @@ console's badge says so. Nothing is faked to cover the gap.
 
 ```bash
 npm test                       # 51 tests — syncing, text editing, the call surface
-pytest                         # 344 tests — research, syncing, the API, the live call, the tools
+pytest                         # 363 tests — research, syncing, the API, the live call, the tools
 ```
 
-395 tests in total. None of them load a language model: a test that spends six seconds on
+414 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
@@ -345,6 +406,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
 | `test_agenda.py` | That she researches before she greets, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
 | `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, and that she will not email anyone who was not on the call |
+| `test_admission.py` | Who may start a call once the agent is on a stranger's website, and that every refusal is a sentence rather than a status code |
 | `test_agents.py` | The line between what a customer may configure and what the platform enforces — a tenant who can switch off the AI disclosure is a liability the vendor inherits |
 | `test_lipsync.py` | The spectrogram her mouth is driven by — a mel that is subtly wrong makes her lip-sync confidently to the wrong sounds, which looks like a bad model rather than a bad constant |
 | `test_avatar.py` | That the face admits what it is: synthetic, and not lip-syncing unless a provider is actually doing it |

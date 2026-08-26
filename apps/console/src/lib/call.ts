@@ -98,6 +98,10 @@ export interface CallState {
   micSupported: boolean;
   /** Who she thinks she is talking to, from the address they typed. */
   contact: { email: string; domain: string; first_name: string; researchable: boolean } | null;
+  /** Which agent answered. On an embed this is the customer's own, not ours. */
+  agent: { name: string; company: string; portrait: string; version: number } | null;
+  /** Set when the server turned the call away — at capacity, too many just now. */
+  refused: string | null;
   /** Where the call is in the plan. */
   step: Step | null;
   panels: Panels;
@@ -121,6 +125,8 @@ const IDLE: CallState = {
   error: null,
   micSupported: false,
   contact: null,
+  agent: null,
+  refused: null,
   step: null,
   panels: {},
   active: null,
@@ -219,6 +225,9 @@ export class LiveCall {
    * path exists because it is the smallest thing that exercises the whole voice stack, and the
    * tests and the screenshot script both use it.
    */
+  /** Which published agent to reach. Empty in the console, which gets tenant zero. */
+  constructor(private readonly agentKey: string = "") {}
+
   async connect(email?: string): Promise<void> {
     if (this.socket) return;
     this.set({
@@ -228,6 +237,7 @@ export class LiveCall {
       turns: [],
       caption: "",
       handoff: false,
+      refused: null,
       panels: {},
       active: null,
       booked: false,
@@ -235,7 +245,10 @@ export class LiveCall {
     });
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${proto}://${location.host}/api/calls/ws`);
+    // The key selects a published agent and authorises nothing. It is in the page source of
+    // the customer's website already, so it is not a secret and is not treated as one.
+    const query = this.agentKey ? `?key=${encodeURIComponent(this.agentKey)}` : "";
+    const socket = new WebSocket(`${proto}://${location.host}/api/calls/ws${query}`);
     this.socket = socket;
 
     socket.onmessage = (event) => this.receive(JSON.parse(event.data));
@@ -285,6 +298,22 @@ export class LiveCall {
         this.set({
           engines: (message.engines as Engines) ?? null,
           contact: (message.contact as CallState["contact"]) ?? null,
+          agent: (message.agent as CallState["agent"]) ?? null,
+        });
+        break;
+
+      case "refused":
+        // Admission turned the call away, or ended one that had run too long. The server
+        // writes the sentence: to a visitor on a customer's website this is the practice not
+        // picking up, and a status code is not a thing you say to somebody.
+        this.stopAudio();
+        this.set({ refused: String(message.spoken ?? ""), phase: "ended" });
+        break;
+
+      case "no_agent":
+        this.set({
+          refused: "This assistant isn't available right now.",
+          phase: "ended",
         });
         break;
 
@@ -345,6 +374,10 @@ export class LiveCall {
           budget,
           handoff: Boolean(message.handoff) || this.state.handoff,
           phase: this.state.speaking ? "speaking" : "listening",
+          // The interim transcript is a live view of somebody talking. Once the turn is
+          // answered it is history, and leaving it up showed the visitor their own last
+          // sentence a second time, in italics, under the reply to it.
+          partial: "",
         });
         break;
       }

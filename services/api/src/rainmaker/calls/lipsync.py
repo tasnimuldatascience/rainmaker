@@ -7,9 +7,11 @@ GPU, on the portrait, driven by the same Kokoro audio the browser is about to pl
 
 WHY IT IS FAST ENOUGH TO BE IN A CONVERSATION, which MuseTalk is not on this hardware:
 
-  * THE FACE NEVER CHANGES. A video pipeline runs face detection per frame; there is one
-    photograph here, so the crop is computed once at import and reused forever. That removes
-    s3fd — a 90MB model and most of the per-frame cost — from the loop entirely.
+  * THE FACE NEVER CHANGES WITHIN A CALL. A video pipeline runs face detection per frame;
+    an agent has ONE photograph, so its crop is computed once and reused for every frame of
+    every call it takes. That removes s3fd — a 90MB model and most of the per-frame cost —
+    from the loop entirely. Different tenants have different faces, so the crops are cached
+    per portrait rather than assumed to be one.
   * IT RUNS PER CLAUSE, NOT PER REPLY. Synthesis already streams clause by clause, so a clip is
     one to three seconds of audio, which is 25 to 75 frames — one batched forward pass.
   * ONLY THE MOUTH IS GENERATED. Wav2Lip works on a 96x96 crop; the rest of the portrait is the
@@ -312,6 +314,30 @@ def face_box(width: int, height: int) -> FaceBox:
     )
 
 
+#: Where the console's static assets live, so a portrait URL can be read as a file.
+PORTRAIT_ROOT = Path(
+    os.environ.get(
+        "RAINMAKER_PORTRAIT_ROOT",
+        Path(__file__).resolve().parents[5] / "apps" / "console" / "public",
+    )
+)
+
+
+def portrait_file(url: str) -> Path:
+    """The file behind an agent's portrait URL.
+
+    Agents carry a URL because the browser needs one; lip-sync needs the pixels. Resolved under
+    a fixed root and checked to stay there — a spec is tenant-supplied data, and a portrait of
+    "/../../etc/passwd" should not be a file read.
+    """
+    candidate = (PORTRAIT_ROOT / url.lstrip("/")).resolve()
+    root = PORTRAIT_ROOT.resolve()
+    if not candidate.is_relative_to(root):
+        log.warning("portrait %r escapes the asset root; ignoring", url)
+        return PORTRAIT_FILE
+    return candidate
+
+
 class LipSync:
     """Generates mouth patches for a clip of audio. One instance, loaded once, shared."""
 
@@ -320,8 +346,10 @@ class LipSync:
         self.portrait = portrait
         self._model: Any = None
         self._device = "cpu"
-        self._base: np.ndarray | None = None
-        self._box: FaceBox | None = None
+        #: Loaded portraits, keyed by path: the image and its crop box. A dental practice and a
+        #: payments company do not share a face, and computing the crop per call would put a
+        #: file read and a resize inside the latency budget for no reason.
+        self._faces: dict[str, tuple[np.ndarray, FaceBox]] = {}
         self._lock = threading.Lock()
 
     @property
@@ -345,7 +373,6 @@ class LipSync:
         with self._lock:
             if self._model is not None:
                 return
-            import cv2
             import torch
 
             state = torch.load(self.checkpoint, map_location="cpu", weights_only=False)
@@ -359,13 +386,25 @@ class LipSync:
             self._device = "cuda" if torch.cuda.is_available() else "cpu"
             self._model = model.to(self._device)
 
-            image = cv2.imread(str(self.portrait))
-            if image is None:
-                raise RuntimeError(f"could not read the portrait at {self.portrait}")
-            self._base = image
-            self._box = face_box(image.shape[1], image.shape[0])
+            self._face(self.portrait)
             self._warm()
-            log.info("lip-sync ready on %s, face box %s", self._device, self._box)
+            log.info("lip-sync ready on %s", self._device)
+
+    def _face(self, portrait: Path) -> tuple[np.ndarray, FaceBox] | None:
+        """The base image and crop for one agent's portrait, loaded once and kept."""
+        import cv2
+
+        key = str(portrait)
+        cached = self._faces.get(key)
+        if cached is not None:
+            return cached
+        image = cv2.imread(key)
+        if image is None:
+            log.warning("could not read the portrait at %s; that agent will not lip-sync", key)
+            return None
+        entry = (image, face_box(image.shape[1], image.shape[0]))
+        self._faces[key] = entry
+        return entry
 
     def _warm(self) -> None:
         """One throwaway pass, so a live call does not pay for cold CUDA kernels.
@@ -380,7 +419,9 @@ class LipSync:
         except Exception:  # noqa: BLE001 — warming is best effort
             log.debug("lip-sync warm-up failed; the first clip will be slower", exc_info=True)
 
-    def frames_for(self, samples: np.ndarray, rate: int) -> list[np.ndarray]:
+    def frames_for(
+        self, samples: np.ndarray, rate: int, portrait: Path | None = None
+    ) -> list[np.ndarray]:
         """Mouth patches for one clip of audio, at `FPS`, as BGR crops.
 
         Returns the PATCH rather than a whole frame: the console holds the portrait already, so
@@ -389,8 +430,12 @@ class LipSync:
         """
         if self._model is None:
             self.load()
-        if self._model is None or self._base is None or self._box is None:
+        if self._model is None:
             return []
+        face = self._face(portrait or self.portrait)
+        if face is None:
+            return []
+        base, box = face
 
         import cv2
         import torch
@@ -424,8 +469,7 @@ class LipSync:
             return []
 
         crop = cv2.resize(
-            self._base[self._box.top : self._box.bottom, self._box.left : self._box.right],
-            (FACE_SIZE, FACE_SIZE),
+            base[box.top : box.bottom, box.left : box.right], (FACE_SIZE, FACE_SIZE)
         )
         # The model's two inputs are the same crop twice: once masked (what to fill in) and once
         # whole (what the face looks like). The lower half is what it regenerates.
@@ -442,10 +486,10 @@ class LipSync:
             generated = self._model(mel_t, face_t)
             out = (generated.cpu().numpy().transpose(0, 2, 3, 1) * 255.0).astype(np.uint8)
 
-        width, height = self._box.size
+        width, height = box.size
         return [cv2.resize(frame, (width, height)) for frame in out]
 
-    def frames_for_wav(self, wav: bytes) -> list[np.ndarray]:
+    def frames_for_wav(self, wav: bytes, portrait: Path | None = None) -> list[np.ndarray]:
         """Mouth patches for a synthesised clip, straight from its WAV bytes."""
         import wave as wave_module
 
@@ -455,7 +499,7 @@ class LipSync:
             rate = handle.getframerate()
             raw = handle.readframes(handle.getnframes())
         samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
-        return self.frames_for(samples, rate)
+        return self.frames_for(samples, rate, portrait)
 
     @staticmethod
     def encode(frames: list[np.ndarray], quality: int = 80) -> list[str]:
@@ -484,5 +528,6 @@ class LipSync:
             "device": self._device,
             "fps": FPS,
             "checkpoint": self.checkpoint.name,
+            "faces_loaded": sorted(Path(p).name for p in self._faces),
             "box": list(FACE_FRACTIONS),
         }

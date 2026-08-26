@@ -33,6 +33,7 @@ import base64
 import contextlib
 import logging
 import os
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -45,11 +46,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .agents.store import LIV_AGENT, LIV_TENANT, AgentStore, seed
+from .calls.admission import Admission, visitor_id
 from .calls.agenda import Agenda, Panel, Phase
 from .calls.avatar import build_avatar
 from .calls.avatar import describe as describe_avatar
 from .calls.intake import InvalidEmail, parse_contact
-from .calls.lipsync import LipSync
+from .calls.lipsync import LipSync, portrait_file
 from .calls.pipeline import (
     TURN_BUDGET_MS,
     CallPipeline,
@@ -89,6 +91,7 @@ class AppState:
     avatar: Any
     lipsync: LipSync
     agents: AgentStore
+    admission: Admission
 
 
 state = AppState()
@@ -127,6 +130,7 @@ async def lifespan(app: FastAPI):
     state.tts = build_voice(os.environ.get("RAINMAKER_VOICE", "auto"))
     state.lipsync = LipSync()
     state.agents = AgentStore()
+    state.admission = Admission()
     # Tenant zero. Our own agent is a row loaded through the path a customer's agent takes, so
     # the demo cannot drift away from the product: if configuration breaks, our front page does.
     seed(state.agents)
@@ -323,6 +327,7 @@ def create_app() -> FastAPI:
             "avatar": {**describe_avatar(state.avatar), "lipsync": state.lipsync.describe()},
             "tools": state.tools.describe(),
             "agents": state.agents.list_agents(),
+            "admission": state.admission.describe(),
             "disclosure": Disclosure().spoken,
             "budget_ms": TURN_BUDGET_MS,
         }
@@ -362,6 +367,26 @@ def create_app() -> FastAPI:
             await ws.close()
             return
 
+        # WHO IS CALLING, AND MAY THEY. On an embed this socket is open to the public web, so
+        # the decision happens before anything expensive: no model, no synthesiser, no browser.
+        # A refusal is a sentence, because the person reading it is standing on a customer's
+        # website rather than looking at a status code.
+        agent_key = spec.public_key or f"{spec.tenant}/{spec.agent_id}"
+        caller = visitor_id(
+            ws.client.host if ws.client else None, ws.headers.get("x-forwarded-for")
+        )
+        verdict = state.admission.may_start(agent_key, caller)
+        if not verdict.allowed:
+            log.info("refused a call to %s: %s", agent_key, verdict.reason)
+            await ws.send_json(
+                {"type": "refused", "reason": verdict.reason, "spoken": verdict.spoken}
+            )
+            await ws.close()
+            return
+        state.admission.started(agent_key, caller)
+        started_at = time.monotonic()
+        turns_taken = 0
+
         # The tenant's chosen voice, on the shared synthesiser. Set per call rather than per
         # process: two tenants' agents must be able to sound different on the same box.
         if hasattr(state.tts, "voice"):
@@ -399,7 +424,12 @@ def create_app() -> FastAPI:
             Worst case the mouth joins a beat into the first clause; the voice never waits.
             """
             try:
-                frames = await asyncio.to_thread(state.lipsync.frames_for_wav, wav)
+                # THE AGENT'S OWN FACE. A dental practice's receptionist must not be lip-synced
+                # onto our account executive's portrait, which is what happened the first time
+                # this ran on a second tenant: Alex answered in Liv's face.
+                frames = await asyncio.to_thread(
+                    state.lipsync.frames_for_wav, wav, portrait_file(spec.portrait)
+                )
                 if not frames:
                     return
                 encoded = await asyncio.to_thread(LipSync.encode, frames)
@@ -526,6 +556,17 @@ def create_app() -> FastAPI:
                     )
 
                 elif kind == "say":
+                    # A call that has gone eighty turns or twenty minutes is a loop or a tab
+                    # somebody walked away from. It is ended with a sentence, not dropped.
+                    turns_taken += 1
+                    ongoing = state.admission.check_ongoing(started_at, turns_taken)
+                    if not ongoing.allowed:
+                        await ws.send_json(
+                            {"type": "refused", "reason": ongoing.reason,
+                             "spoken": ongoing.spoken}
+                        )
+                        break
+
                     # THE DISCLOSURE IS NOT INTERRUPTIBLE. Cancelling the opening turn leaves it
                     # undelivered, and the pipeline then refuses every turn for the rest of the
                     # call — see `Agenda.defer`. Held and replayed instead.
@@ -580,6 +621,9 @@ def create_app() -> FastAPI:
             # The socket is going; frames for it are worth nothing.
             for task in list(mouths):
                 task.cancel()
+            # ALWAYS, including when the socket died badly. A leaked live-count is worse than
+            # any limit it enforces: the agent stops answering and nothing says why.
+            state.admission.finished(agent_key)
 
     # ─────────────────────────────────────────────────────────── deals (read-only)
     @app.get("/api/deals")
