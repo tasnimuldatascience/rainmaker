@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-480%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-487%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -496,10 +496,10 @@ worse than the call it prevented.
 
 ```bash
 npm test                       # 53 tests — syncing, text editing, the call surface
-pytest                         # 427 tests — research, syncing, the API, the live call, the tools
+pytest                         # 434 tests — research, syncing, the API, the live call, the tools
 ```
 
-480 tests in total. None of them load a language model: a test that spends six seconds on
+487 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
@@ -513,7 +513,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
 | `test_agenda.py` | That she researches before she greets, that the page she opens is ours and not theirs, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
 | `test_payments.py` | That the amount comes from the quote and not the conversation, that nothing above the ceiling goes through without a person, and that there is no parameter anywhere that could carry a card number |
-| `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, and that she will not email anyone who was not on the call |
+| `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, that she will not email anyone who was not on the call, and that the CRM accepts every outcome the agenda can actually produce |
 | `test_admission.py` | Who may start a call once the agent is on a stranger's website, and that every refusal is a sentence rather than a status code |
 | `test_agents.py` | The line between what a customer may configure and what the platform enforces — a tenant who can switch off the AI disclosure is a liability the vendor inherits |
 | `test_lipsync.py` | The spectrogram her mouth is driven by — a mel that is subtly wrong makes her lip-sync confidently to the wrong sounds, which looks like a bad model rather than a bad constant |

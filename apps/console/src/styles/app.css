@@ -330,6 +330,11 @@
        scrolls inside itself rather than pushing the composer off the bottom. */
     display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: var(--s-4);
   }
+  /* The stage keeps clear of the portrait, so a panel's own content never runs underneath it. */
+  @media (min-width: 1101px) {
+    .demo > .stage-card, .demo > .screen { padding-inline-end: 17rem; }
+    .demo > .caption { padding-inline-end: 17rem; }
+  }
   .demo[data-live="true"] { border-color: color-mix(in oklab, var(--agent) 40%, var(--line)); }
 
   .pill {
@@ -372,6 +377,11 @@
 
   /* The floating agent window. Sized like a picture-in-picture call rather than a hero image:
      a face big enough to read expression, small enough that the page is still the subject. */
+  /* SHE SITS BESIDE THE PANEL, NOT ON TOP OF IT. Absolutely positioned over the stage, the
+     portrait covered the right-hand end of every row it overlapped — the third time slot, the
+     edge of the quote card — which reads as a rendering bug rather than as a video window.
+     The stage now reserves a column for her at wide sizes and she tucks into the corner only
+     when there is no room for one. */
   .pip {
     position: absolute; inset-block-end: 7.5rem; inset-inline-end: var(--s-6);
     inline-size: 15rem; aspect-ratio: 4 / 3.4; border-radius: var(--r-lg); overflow: hidden;
@@ -456,7 +466,9 @@
   }
   @media (max-width: 1100px) { .call-grid { grid-template-columns: minmax(0, 1fr); } }
 
-  .rail { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+  /* Nine steps on one line at 1500px and two lines below it, with the aside ("Getting a person")
+     always last. `row-gap` keeps the second row from touching the first when it wraps. */
+  .rail { display: flex; flex-wrap: wrap; gap: var(--s-2); row-gap: var(--s-2); align-items: center; }
   .rail-step {
     font-size: var(--t-xs); padding: 3px var(--s-3); border-radius: var(--r-full);
     border: 1px solid var(--line); color: var(--fg-4); white-space: nowrap;
@@ -584,15 +596,76 @@
     padding-inline-start: var(--s-4); border-inline-start: 2px solid var(--accent-lo);
   }
 
-  .slot-list { display: grid; gap: var(--s-2); margin-block-start: var(--s-4); max-inline-size: 34rem; }
-  .slot {
-    text-align: start; padding: var(--s-3) var(--s-4); border-radius: var(--r-md);
-    border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--fg);
-    font: inherit; font-size: var(--t-md); cursor: pointer;
-    transition: border-color var(--fast), background var(--fast);
+  /* ── the diary ─────────────────────────────────────────────────────── */
+  .page-head .btn { margin-inline-start: auto; }
+
+  .empty-card {
+    display: grid; gap: var(--s-2); justify-items: start; padding: var(--s-6);
+    border: 1px dashed var(--line-strong); border-radius: var(--r-lg); background: var(--surface-1);
+    max-inline-size: 46rem;
   }
-  .slot:hover { border-color: var(--accent); background: var(--surface-3); }
-  .slot[data-failed="true"] { opacity: 0.45; text-decoration: line-through; cursor: not-allowed; }
+  .empty-card h3 { font-size: var(--t-md); font-weight: 620; }
+
+  .diary { display: grid; gap: var(--s-6); max-inline-size: 76rem; }
+  .diary-day {
+    font-size: var(--t-xs); font-weight: 650; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-3); padding-block-end: var(--s-2); margin-block-end: var(--s-3);
+    border-block-end: 1px solid var(--line);
+  }
+  .meeting {
+    display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) auto; gap: var(--s-4);
+    align-items: start; padding: var(--s-4); border-radius: var(--r-md);
+    border: 1px solid var(--line); background: var(--surface-1);
+    margin-block-end: var(--s-3); transition: border-color var(--fast);
+  }
+  .meeting:hover { border-color: var(--line-strong); }
+  .meeting-when {
+    display: grid; gap: 2px; font-variant-numeric: tabular-nums;
+    border-inline-start: 3px solid color-mix(in oklab, var(--accent) 55%, transparent);
+    padding-inline-start: var(--s-3);
+  }
+  .meeting-when b { font-size: var(--t-lg); letter-spacing: -0.01em; }
+  .meeting-who { display: grid; gap: 3px; justify-items: start; min-inline-size: 0; }
+  .meeting-who b { font-size: var(--t-md); }
+  .meeting-notes {
+    font-size: var(--t-sm); color: var(--fg-2); margin-block-start: var(--s-2);
+    padding-inline-start: var(--s-3); border-inline-start: 2px solid var(--line);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  @media (max-width: 720px) {
+    .meeting { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* A TIME YOU CAN CLICK HAS TO LOOK LIKE ONE. These were three grey rectangles in a list, and
+     the person testing it read them as a printout and waited for something to happen — the
+     booking step "did not work" because nothing on screen suggested it was their turn. A
+     chevron, an accent edge, a hover that lifts, and the word "Pick" underneath. */
+  .slot-list { display: grid; gap: var(--s-3); margin-block-start: var(--s-4); max-inline-size: 34rem; }
+  .slot {
+    position: relative; text-align: start;
+    padding: var(--s-4) 3rem var(--s-4) var(--s-5);
+    border-radius: var(--r-md);
+    border: 1px solid var(--line-strong);
+    border-inline-start: 3px solid color-mix(in oklab, var(--accent) 55%, transparent);
+    background: var(--surface-2); color: var(--fg);
+    font: inherit; font-size: var(--t-md); font-weight: 560; cursor: pointer;
+    transition: border-color var(--fast), background var(--fast), transform var(--fast),
+                box-shadow var(--fast);
+  }
+  .slot::after {
+    content: "→"; position: absolute; inset-inline-end: var(--s-4); inset-block-start: 50%;
+    transform: translateY(-50%); color: var(--accent); font-size: var(--t-lg);
+    transition: transform var(--fast);
+  }
+  .slot:hover, .slot:focus-visible {
+    border-color: var(--accent); background: var(--surface-3);
+    transform: translateY(-1px); box-shadow: var(--shadow-2); outline: none;
+  }
+  .slot:hover::after, .slot:focus-visible::after { transform: translateY(-50%) translateX(3px); }
+  .slot[data-failed="true"] {
+    opacity: 0.45; text-decoration: line-through; cursor: not-allowed; transform: none;
+  }
+  .slot[data-failed="true"]::after { content: "✕"; color: var(--lost); }
 
   .tiers { display: grid; gap: var(--s-3); margin-block-start: var(--s-4);
            grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }

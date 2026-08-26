@@ -123,13 +123,18 @@ def record_call_outcome(
 ) -> dict[str, Any]:
     """Args:
     deal_id: The deal this call was about.
-    outcome: One of "meeting_booked", "not_a_fit", "handed_off", "no_decision".
+    outcome: One of "checkout_sent", "meeting_booked", "handed_off", "not_a_fit",
+        "no_decision".
     stage: Pipeline stage to move the deal to, if it should move.
     summary: One line a rep can read before their next call.
     company: The prospect's company, if the deal is new.
     contact_email: Who was on the call.
     """
-    allowed = {"meeting_booked", "not_a_fit", "handed_off", "no_decision"}
+    # THE BEST OUTCOME WAS MISSING FROM THE LIST. `checkout_sent` was added when the call
+    # learned to close, and this allow-list was not — so every call that ended in a sale threw
+    # here and never reached the pipeline. It failed silently, after the talking, in a
+    # `try/except` that exists so a dead CRM cannot end a live call.
+    allowed = {"checkout_sent", "meeting_booked", "handed_off", "not_a_fit", "no_decision"}
     if outcome not in allowed:
         raise ValueError(f"outcome must be one of {sorted(allowed)}, got {outcome!r}")
 

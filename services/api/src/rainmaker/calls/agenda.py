@@ -953,7 +953,12 @@ class Agenda:
                     "attendee_email": self.contact.email,
                     "attendee_name": self.contact.first_name,
                     "company": self.session.prospect.company,
-                    "notes": " ".join(self.transcript_lines[-6:])[:500],
+                    # WHAT A REP READS BEFORE WALKING IN, not the tape. This used to paste the
+                    # last six lines of dialogue verbatim, so the diary showed "Prospect: how
+                    # much does it cost? Liv: Pricing depends on seats and..." — the raw
+                    # transcript, mid-sentence, as the meeting's title text. The full transcript
+                    # is already on the deal; what belongs here is why the meeting exists.
+                    "notes": self._booking_note(),
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -1062,6 +1067,30 @@ class Agenda:
             log.debug("no recap drafted: %s", exc)
 
         yield Phase(Step.WRAP, outcome)
+
+    def _booking_note(self) -> str:
+        """One or two sentences of context for whoever takes the meeting.
+
+        Assembled from what the call established rather than quoted from it: what they said they
+        needed, what she showed them, and where the money got to. A rep opening their diary
+        wants the reason, not the recording.
+        """
+        company = self.session.prospect.company or self.contact.company_guess
+        parts = [f"{company} — booked by Liv." if company else "Booked by Liv."]
+
+        asked = next(
+            (line[len("Prospect: ") :] for line in self.transcript_lines if line.startswith("Prospect: ")),
+            "",
+        )
+        if asked:
+            parts.append(f'They opened with: "{asked[:160].strip()}"')
+        if self.quote is not None:
+            parts.append(f"Quoted {self.quote.money(self.quote.total)} per {self.quote.period}.")
+        if self.wants_human:
+            parts.append("They asked for a person.")
+        if self.shown:
+            parts.append(f"Shown {len(self.shown)} page(s) of the product.")
+        return " ".join(parts)[:400]
 
     def _summary(self, outcome: str) -> str:
         company = self.session.prospect.company or self.contact.company_guess or "the prospect"

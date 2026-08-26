@@ -676,6 +676,37 @@ def create_app() -> FastAPI:
             **spec.intake.as_dict(),
         }
 
+    # ─────────────────────────────────────────────────────────── the diary
+    @app.get("/api/calendar")
+    async def calendar(include_cancelled: bool = False) -> dict[str, Any]:
+        """What the agent has actually booked.
+
+        THE MEETINGS EXISTED AND NOTHING SHOWED THEM. `list_bookings` has been on the calendar
+        server since it was written, the agent has been filling it in, and the only way to read
+        it back was to open a SQLite file — so the honest reaction to booking a meeting was
+        "where is the calendar?". A tool nobody can see the output of is indistinguishable from
+        a tool that did nothing.
+
+        Through the tool, like the checkout lookup, so swapping the local calendar for a
+        customer's Google Calendar changes nothing above this line.
+        """
+        try:
+            found = await state.tools.call(
+                "calendar.list_bookings", {"include_cancelled": include_cancelled}
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.info("could not read the calendar: %s", exc)
+            return {"bookings": [], "count": 0, "unavailable": True}
+        return found
+
+    @app.post("/api/calendar/{booking_id}/cancel")
+    async def cancel_booking(booking_id: str) -> dict[str, Any]:
+        """Cancel a meeting the agent booked. The slot goes back on offer."""
+        try:
+            return await state.tools.call("calendar.cancel_meeting", {"booking_id": booking_id})
+        except Exception as exc:  # noqa: BLE001
+            return {"cancelled": False, "reason": str(exc)}
+
     # ─────────────────────────────────────────────────────────── checkouts
     @app.get("/api/checkouts/{checkout_id}")
     async def checkout(checkout_id: str) -> dict[str, Any]:

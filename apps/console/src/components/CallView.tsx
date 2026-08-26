@@ -537,9 +537,10 @@ function Stage({
   if (active === "slots" && panels.slots) {
     return (
       <div className="stage-card">
-        <h3>Times she actually has</h3>
+        <h3>Pick a time and she&apos;ll book it</h3>
         <p className="sub">
-          Read straight from the calendar tool, in its own words. She is not allowed to invent one.
+          Read straight from the calendar tool, in its own words. She is not allowed to invent
+          one — and clicking is what confirms it, not saying yes.
         </p>
         <div className="slot-list">
           {panels.slots.slots.map((slot, i) => (

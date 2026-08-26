@@ -157,6 +157,54 @@ class TestTheOneThingThatMustNotHappen:
         assert result["reason"] == "not_found"
 
 
+class TestTheCrmAcceptsEveryOutcomeTheCallCanReach:
+    """FOUND BY READING A LOG, NOT BY A TEST, WHICH IS THE POINT OF THIS CLASS. `checkout_sent`
+    was added when the call learned to close and this allow-list was not, so the best outcome a
+    call can have — a sale — threw here and never reached the pipeline. It failed after the
+    talking, inside the `try/except` that exists so a dead CRM cannot end a live call, and the
+    only trace was one line of server log.
+    """
+
+    @pytest.fixture
+    def crm(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        import importlib
+
+        monkeypatch.setenv("RAINMAKER_DATA", str(tmp_path))
+        from rainmaker.mcp.servers import crm as module
+
+        return importlib.reload(module)
+
+    @pytest.mark.parametrize(
+        "outcome",
+        ["checkout_sent", "meeting_booked", "handed_off", "not_a_fit", "no_decision"],
+    )
+    def test_every_outcome_the_agenda_can_produce_is_accepted(self, crm, outcome: str):
+        written = crm.record_call_outcome(
+            deal_id="d-corvus", outcome=outcome, summary="a call happened",
+            company="Corvus Data", contact_email="dana@corvusdata.io",
+        )
+        assert written["ops_written"] > 0
+
+    def test_the_allow_list_matches_what_the_agenda_actually_emits(self):
+        """Two lists in two files that must agree. Comparing them here is cheaper than the
+        afternoon it took to notice they had stopped."""
+        import inspect
+
+        from rainmaker.calls.agenda import Agenda
+
+        emitted = {
+            line.split('return "')[1].split('"')[0]
+            for line in inspect.getsource(Agenda._outcome).splitlines()
+            if 'return "' in line
+        }
+        allowed = {"checkout_sent", "meeting_booked", "handed_off", "not_a_fit", "no_decision"}
+        assert emitted <= allowed, f"the agenda emits {emitted - allowed}, which the CRM refuses"
+
+    def test_rubbish_is_still_refused(self, crm):
+        with pytest.raises(ValueError, match="outcome must be one of"):
+            crm.record_call_outcome(deal_id="d-x", outcome="vibes")
+
+
 class TestTheEmailServerIsSafeByDefault:
     def test_a_recap_can_be_drafted_with_no_mail_server(self):
         """The drafting is the hard part and works everywhere. Sending needs an account, which

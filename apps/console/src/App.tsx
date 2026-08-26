@@ -4,6 +4,7 @@
  * Three surfaces, one local replica behind all of them:
  *
  *   Pipeline  the board. Every edit is a local CRDT op; the network is incidental.
+ *   Calendar  what the agent booked, read back through the same tool it books with.
  *   Research  the browser agent's output, rendered with provenance so a rep can see the
  *             difference between "their site says this" and "a model thinks this".
  *   Call      the live agent: disclosure, transcript, and the measured latency budget.
@@ -13,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { CalendarView } from "./components/CalendarView";
 import { CallView } from "./components/CallView";
 import { DealDrawer } from "./components/DealDrawer";
 import { PipelineBoard } from "./components/PipelineBoard";
@@ -21,11 +23,12 @@ import { SyncBadge } from "./components/SyncBadge";
 import { seedIfEmpty } from "./lib/seed";
 import { useLocalStore, useStoreStatus, useTheme } from "./lib/useStore";
 
-type View = "pipeline" | "research" | "call";
+type View = "pipeline" | "research" | "calendar" | "call";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "pipeline", label: "Pipeline" },
   { id: "research", label: "Research" },
+  { id: "calendar", label: "Calendar" },
   { id: "call", label: "Live call" },
 ];
 
@@ -92,6 +95,7 @@ export default function App() {
       <main className="main">
         {view === "pipeline" && <PipelineBoard store={store} onOpen={openDeal} selected={selected} />}
         {view === "research" && <ResearchPanel store={store} />}
+        {view === "calendar" && <CalendarView />}
         {view === "call" && <CallView store={store} />}
       </main>
       {selected && (
