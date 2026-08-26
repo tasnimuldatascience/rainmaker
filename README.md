@@ -31,7 +31,9 @@ checkout in front of you. If the deal genuinely needs a person, it books one out
 calendar. **Nobody is waiting in a queue behind it, because there is nobody behind it.**
 
 **That call is also the product.** Rainmaker sells the agent to other businesses, who configure
-their own and put it on their own website. Ours is simply the first row in the table.
+their own and put it on their own website. The console opens on a customer's rather than on ours
+— theirs sells GPUs by the hour, with a rate card, a competitor and a site to walk you round;
+ours would be selling you the thing you are already looking at.
 
 | Part | What it does |
 |---|---|
@@ -122,6 +124,7 @@ FIRECRAWL_API_KEY=fc-…     # use the real research API instead of the built-in
 STRIPE_SECRET_KEY=sk_…     # take real money instead of the local mock checkout
 OUR_CATEGORY="vector search,learning-to-rank"   # rank job posts mentioning these highest
 RAINMAKER_VOICE=browser    # force the fallback voice, to hear the difference
+RAINMAKER_VOICE_SPEED=1.0  # Kokoro clips its own phrase endings above about 1.05
 RAINMAKER_MAX_CHARGE=…     # the ceiling above which a person has to sign, in minor units
 RAINMAKER_CALLS_PER_VISITOR_HOUR=…   # raise the rate limit; the screenshot script needs this
 ```
@@ -390,7 +393,7 @@ shapes come from spelling, which is a poor guide to pronunciation, but its mouth
 measured amplitude of the audio actually playing — so the half a viewer notices is real. One
 button switches between them and the choice is remembered.
 
-<img src="docs/img/mouth.png" alt="Consecutive frames of Liv mid-sentence" width="100%">
+<img src="docs/img/mouth.png" alt="Consecutive frames of an agent mid-sentence" width="100%">
 
 Those are consecutive frames of one sentence. Nothing is warped or interpolated; each mouth was
 generated for the audio playing at that instant.
