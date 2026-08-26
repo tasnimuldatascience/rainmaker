@@ -31,15 +31,30 @@ os.environ.setdefault("RAINMAKER_VOICE", "browser")
 # alternative is a test that shells out to `pytest --collect-only`, which re-imports every test
 # module inside a test run.
 _COLLECTED = 0
+_FULL_RUN = True
 
 
 def pytest_collection_modifyitems(session, config, items) -> None:  # noqa: ARG001
-    global _COLLECTED
+    """Record the size of this run, and whether it was the whole suite.
+
+    THE "WHOLE SUITE" PART MATTERS. `test_readme.py` compares the published count against this
+    number, and running one file — which is what anyone does while working on that file —
+    collects three tests and made the check fail with a number nobody had broken. A test that
+    cries wolf on a subset run gets ignored on the run that counts.
+    """
+    global _COLLECTED, _FULL_RUN
     _COLLECTED = len(items)
+    _FULL_RUN = not (
+        config.option.keyword
+        or config.option.markexpr
+        or any("::" in arg or arg.endswith(".py") for arg in config.args)
+    )
 
 
 # NOT named `pytest_collected`: pluggy treats every `pytest_*` name in a conftest as a hook
 # implementation and refuses to start when it does not recognise one.
 @pytest.fixture
 def collected_test_count() -> int:
+    if not _FULL_RUN:
+        pytest.skip("only meaningful on a full run; this one was filtered to a subset")
     return _COLLECTED

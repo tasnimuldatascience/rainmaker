@@ -31,6 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .calls.agenda import Agenda, Panel, Phase
+from .calls.intake import InvalidEmail, parse_contact
 from .calls.pipeline import (
     TURN_BUDGET_MS,
     CallPipeline,
@@ -49,6 +51,7 @@ from .calls.providers import (
     engines,
 )
 from .calls.session import CallSession, Prospect, facts_from_enrichment
+from .mcp.client import ToolBroker
 from .research import ResearchAgent, ResearchConfig, ResearchRequest, build_fetcher
 from .sync.hub import SyncHub
 from .sync.oplog import OpLog
@@ -65,6 +68,7 @@ class AppState:
     agent: ResearchAgent
     llm: LanguageModel
     tts: TextToSpeech
+    tools: ToolBroker
 
 
 state = AppState()
@@ -103,6 +107,11 @@ async def lifespan(app: FastAPI):
     state.tts = build_voice(os.environ.get("RAINMAKER_VOICE", "auto"))
     warming = asyncio.create_task(_warm_engines())
 
+    # The tool servers are subprocesses and must be started and stopped from the SAME task —
+    # `stdio_client` opens anyio cancel scopes that are task-bound. The lifespan is that task.
+    state.tools = ToolBroker()
+    await state.tools.start()
+
     key = os.environ.get("FIRECRAWL_API_KEY", "").strip()
     backend = os.environ.get("RESEARCH_BACKEND", "auto")
     state.agent = ResearchAgent(
@@ -128,6 +137,7 @@ async def lifespan(app: FastAPI):
         warming.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await warming
+        await state.tools.close()
         await state.agent.close()
         state.oplog.close()
 
@@ -280,6 +290,7 @@ def create_app() -> FastAPI:
         """
         return {
             "engines": engines(state.llm, state.tts),
+            "tools": state.tools.describe(),
             "disclosure": Disclosure().spoken,
             "budget_ms": TURN_BUDGET_MS,
         }
@@ -288,11 +299,18 @@ def create_app() -> FastAPI:
     async def call_ws(ws: WebSocket) -> None:
         """One call per socket.
 
-        THE PROTOCOL IS DELIBERATELY SMALL. In: `start`, `say`, `stop`. Out: `disclosure`,
-        `heard`, `token`, `clip`, `budget`, `done`. Audio goes out as base64 WAV inside the JSON
-        rather than on a binary frame — a second channel would need its own ordering and its own
-        reconnect logic to keep clips in sequence with the captions they belong to, and this
-        stream is a few hundred kilobytes a minute.
+        THE CALL STARTS WITH AN EMAIL ADDRESS, not a button. `email` is the first message: the
+        domain in it is everything Liv knows before she speaks, so research runs on it and the
+        prospect watches that happen. `start` remains for a call with no intake — the plain
+        conversation, no research, no agenda.
+
+        In:  `email`, `start`, `say`, `pick_slot`, `stop`, `ping`.
+        Out: `disclosure`, `heard`, `token`, `clip`, `done`, `panel`, `phase`, `interrupted`.
+
+        Audio goes out as base64 WAV inside the JSON rather than on a binary frame — a second
+        channel would need its own ordering and its own reconnect logic to keep clips in
+        sequence with the captions they belong to, and this stream is a few hundred kilobytes a
+        minute. The browser frames on `panel` are JPEG for the same reason.
 
         `say` carries the prospect's words whether they typed them or spoke them, plus the two
         latency stages only the client can measure. See `LatencyBudget.adopt`.
@@ -309,6 +327,7 @@ def create_app() -> FastAPI:
                 domain=ws.query_params.get("domain", ""),
             ),
         )
+        agenda: Agenda | None = None
 
         async def send_events(events: AsyncIterator[Any]) -> None:
             async for event in events:
@@ -333,6 +352,12 @@ def create_app() -> FastAPI:
                             else "",
                             "browser_voice": event.clip.browser_voice,
                         }
+                    )
+                elif isinstance(event, Panel):
+                    await ws.send_json({"type": "panel", "panel": event.kind, **event.data})
+                elif isinstance(event, Phase):
+                    await ws.send_json(
+                        {"type": "phase", "step": str(event.step), "detail": event.detail}
                     )
                 elif isinstance(event, Finished):
                     await ws.send_json(
@@ -368,7 +393,36 @@ def create_app() -> FastAPI:
                         {"type": "briefed", "facts": len(session.prospect.facts)}
                     )
 
+                elif kind == "email":
+                    # THE FRONT DOOR. Everything Liv knows before she speaks comes from the
+                    # domain in this address, so a bad one is answered with a sentence rather
+                    # than a validation code — someone is watching a form.
+                    try:
+                        contact = parse_contact(message.get("email", ""))
+                    except InvalidEmail as exc:
+                        await ws.send_json({"type": "intake_error", "spoken": exc.spoken})
+                        continue
+
+                    agenda = Agenda(session, state.tools, contact)
+                    await ws.send_json(
+                        {
+                            "type": "disclosure",
+                            "text": session.pipeline.disclosure.spoken,
+                            "engines": engines(state.llm, state.tts),
+                            "contact": {
+                                "email": contact.email,
+                                "domain": contact.domain,
+                                "first_name": contact.first_name,
+                                "researchable": contact.researchable,
+                            },
+                        }
+                    )
+                    turn = asyncio.create_task(send_events(agenda.begin()))
+
                 elif kind == "start":
+                    # The plain conversation: no intake, no research, no agenda. Kept because
+                    # it is the smallest thing that exercises the whole voice path, which is
+                    # what the tests and the screenshot script use.
                     await ws.send_json(
                         {
                             "type": "disclosure",
@@ -378,7 +432,25 @@ def create_app() -> FastAPI:
                     )
                     turn = asyncio.create_task(send_events(session.open()))
 
+                elif kind == "pick_slot":
+                    if agenda is None:
+                        continue
+                    if turn and not turn.done():
+                        turn.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await turn
+                    turn = asyncio.create_task(
+                        send_events(agenda.confirm_slot(int(message.get("index", 0))))
+                    )
+
                 elif kind == "say":
+                    # THE DISCLOSURE IS NOT INTERRUPTIBLE. Cancelling the opening turn leaves it
+                    # undelivered, and the pipeline then refuses every turn for the rest of the
+                    # call — see `Agenda.defer`. Held and replayed instead.
+                    if agenda is not None and agenda.defer(message.get("text", "")):
+                        await ws.send_json({"type": "deferred"})
+                        continue
+
                     # BARGE-IN. A prospect who starts talking over the agent has stopped
                     # listening, and an agent that finishes its sentence anyway is the single
                     # most robotic thing it can do. Cancelling here also frees the GPU for the
@@ -397,9 +469,15 @@ def create_app() -> FastAPI:
                         for stage, key in (("stt", "stt_ms"), ("avatar", "avatar_ms"))
                         if isinstance(message.get(key), int | float)
                     }
+                    said = message.get("text", "")
+                    # With an agenda the turn is a step in a plan; without one it is a reply.
+                    # Both end up in `session.respond` — the agenda decides what happens around
+                    # it, not instead of it.
                     turn = asyncio.create_task(
                         send_events(
-                            session.respond(message.get("text", ""), budget_hints=hints)
+                            agenda.respond(said, budget_hints=hints)
+                            if agenda is not None
+                            else session.respond(said, budget_hints=hints)
                         )
                     )
 

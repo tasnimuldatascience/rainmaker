@@ -46,6 +46,40 @@ export interface Engines {
   stt: { name: string; local: boolean };
 }
 
+/** Something Liv put on the stage. The most recent of each kind is kept. */
+export interface Panels {
+  facts?: { company: string; domain: string; facts: string[]; pages_read?: string[] };
+  browser?: { state: string; url: string; title?: string; label?: string; frame?: string };
+  slots?: { slots: Slot[]; failed?: string };
+  pricing?: { company: string; size?: string; tiers: Tier[]; note?: string };
+  booking?: { spoken: string; booking_id: string; starts_at: string };
+  draft?: { subject: string; body: string; can_send: boolean; why_not?: string };
+  note?: { text: string };
+}
+
+export interface Slot {
+  starts_at: string;
+  ends_at: string;
+  spoken: string;
+}
+
+export interface Tier {
+  name: string;
+  per_seat: string;
+  for: string;
+}
+
+export type Step =
+  | "researching"
+  | "opening"
+  | "discovery"
+  | "showing"
+  | "proposing"
+  | "booking"
+  | "pricing"
+  | "wrap"
+  | "handoff";
+
 export interface CallState {
   phase: CallPhase;
   turns: Turn[];
@@ -62,6 +96,16 @@ export interface CallState {
   budget: Record<string, number> | null;
   error: string | null;
   micSupported: boolean;
+  /** Who she thinks she is talking to, from the address they typed. */
+  contact: { email: string; domain: string; first_name: string; researchable: boolean } | null;
+  /** Where the call is in the plan. */
+  step: Step | null;
+  panels: Panels;
+  /** Which panel the stage is showing. The newest one that is worth looking at. */
+  active: keyof Panels | null;
+  /** Set when the address was rejected at the front door. */
+  intakeError: string | null;
+  booked: boolean;
 }
 
 const IDLE: CallState = {
@@ -76,6 +120,12 @@ const IDLE: CallState = {
   budget: null,
   error: null,
   micSupported: false,
+  contact: null,
+  step: null,
+  panels: {},
+  active: null,
+  intakeError: null,
+  booked: false,
 };
 
 /** Chrome exposes this prefixed; Safari does too. Neither ships types for it. */
@@ -149,9 +199,27 @@ export class LiveCall {
   }
 
   // ── the socket ─────────────────────────────────────────────────────────
-  async connect(brief?: { company: string; domain: string; enrichment: unknown }): Promise<void> {
+  /**
+   * Open the socket and, if an address was given, start the guided call.
+   *
+   * WITHOUT AN EMAIL THIS IS STILL A CALL — the plain conversation, no research, no plan. That
+   * path exists because it is the smallest thing that exercises the whole voice stack, and the
+   * tests and the screenshot script both use it.
+   */
+  async connect(email?: string): Promise<void> {
     if (this.socket) return;
-    this.set({ phase: "connecting", error: null, turns: [], caption: "", handoff: false });
+    this.set({
+      phase: "connecting",
+      error: null,
+      intakeError: null,
+      turns: [],
+      caption: "",
+      handoff: false,
+      panels: {},
+      active: null,
+      booked: false,
+      step: null,
+    });
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${proto}://${location.host}/api/calls/ws`);
@@ -181,21 +249,59 @@ export class LiveCall {
     }
 
     this.captionParts = [];
-    if (brief) socket.send(JSON.stringify({ type: "brief", ...brief }));
-    socket.send(JSON.stringify({ type: "start" }));
+    socket.send(
+      JSON.stringify(email ? { type: "email", email } : { type: "start" }),
+    );
     this.set({ phase: "greeting" });
+  }
+
+  /** Accept one of the times she offered. */
+  pickSlot(index: number): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    this.stopAudio();
+    this.socket.send(JSON.stringify({ type: "pick_slot", index }));
+    this.set({ phase: "thinking" });
   }
 
   private receive(message: Record<string, unknown>): void {
     switch (message.type) {
       case "disclosure":
-        this.set({ engines: (message.engines as Engines) ?? null });
-        this.pushTurn({ who: "agent", text: String(message.text) });
+        // METADATA, NOT A TURN. The disclosure is also spoken, and speaking it produces clips
+        // and a `done` like any other utterance — pushing a turn here too put it in the
+        // transcript twice, once before it was said and once after.
+        this.set({
+          engines: (message.engines as Engines) ?? null,
+          contact: (message.contact as CallState["contact"]) ?? null,
+        });
         break;
 
       case "heard":
         this.set({ partial: String(message.text) });
         break;
+
+      case "intake_error":
+        // Not a socket error. Someone mistyped their address and is watching a form.
+        this.set({ intakeError: String(message.spoken), phase: "idle" });
+        this.socket?.close();
+        break;
+
+      case "phase":
+        this.set({ step: message.step as Step });
+        break;
+
+      case "panel": {
+        const kind = String(message.panel) as keyof Panels;
+        const { type: _type, panel: _panel, ...data } = message;
+        const panels = { ...this.state.panels, [kind]: data } as Panels;
+        this.set({
+          panels,
+          // A browser frame outranks whatever was there: it is the thing she is talking about
+          // right now. Everything else simply becomes the newest panel.
+          active: kind === "browser" && data.state === "opening" ? this.state.active : kind,
+          booked: kind === "booking" ? true : this.state.booked,
+        });
+        break;
+      }
 
       case "token":
         // Tokens are not rendered as they arrive. The caption follows the AUDIO — showing text

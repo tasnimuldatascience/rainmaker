@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-226%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-286%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -265,11 +265,11 @@ that drift and return, and a listening pose so she never freezes between sentenc
 ## Tests
 
 ```bash
-npm test                       # 47 tests — syncing and text editing
-pytest                         # 179 tests — research, syncing, the API, the live call, the tools
+npm test                       # 49 tests — syncing, text editing, the call rail
+pytest                         # 237 tests — research, syncing, the API, the live call, the tools
 ```
 
-226 tests in total. None of them load a language model: a test that spends six seconds on
+286 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
@@ -281,6 +281,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `test_app.py` | **The offline flush endpoint.** Reconnect, retry, deduplicate, and never half-apply a batch |
 | `test_pipeline.py` | That a call cannot start without the AI disclosure, and that every stage of the turn is measured |
 | `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
+| `test_agenda.py` | That she researches before she greets, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
 | `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, and that she will not email anyone who was not on the call |
 | `test_readme.py` | That these counts are the counts. A badge is an image, and nobody proofreads an image |
 

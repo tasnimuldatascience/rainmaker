@@ -25,6 +25,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from .naming import clean_company_name  # noqa: F401 — re-exported for callers
 from .pipeline import (
     CallPipeline,
     Clip,

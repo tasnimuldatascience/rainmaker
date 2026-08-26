@@ -34,10 +34,22 @@ from typing import Any
 
 log = logging.getLogger("rainmaker.mcp")
 
-#: How long a single tool call may take before the agenda is told it failed. Generous enough for
-#: a cold third-party server, short enough that the prospect does not sit in silence: the agent
-#: says "one moment" and then has to say something else.
-CALL_TIMEOUT_SECONDS = 12.0
+#: How long a tool call may take before the agenda is told it failed.
+#:
+#: PER SERVER, BECAUSE ONE NUMBER IS WRONG FOR BOTH KINDS OF TOOL. A calendar lookup is a SQLite
+#: read and should never take a second; reading a prospect's website is half a dozen real page
+#: loads over someone else's network. A flat twelve seconds killed the research call at 11.5s
+#: — the tool had done its job and the client hung up on it, and the console showed "could not
+#: read anthropic.com" for a site that had been read perfectly well.
+#:
+#: The long deadlines are only tolerable because the agenda says something before it waits: see
+#: `Agenda._research`. A tool that takes twenty seconds in silence is a broken call whatever the
+#: timeout says.
+DEFAULT_TIMEOUT_SECONDS = 12.0
+TIMEOUT_SECONDS: dict[str, float] = {
+    "research": 60.0,   # real page loads on someone else's site
+    "email": 25.0,      # an SMTP handshake to a server that may be far away
+}
 
 #: How long a server gets to start and answer `initialize`. A server that cannot start in this
 #: long is not going to be useful mid-call.
@@ -242,7 +254,16 @@ class ToolBroker:
     def has(self, qualified: str) -> bool:
         return qualified in self.tools
 
-    async def call(self, qualified: str, arguments: dict[str, Any] | None = None) -> Any:
+    def timeout_for(self, server: str) -> float:
+        return TIMEOUT_SECONDS.get(server, DEFAULT_TIMEOUT_SECONDS)
+
+    async def call(
+        self,
+        qualified: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> Any:
         """Call `server.tool` and return its structured result.
 
         Raises `ToolError` for everything — a missing server, a timeout, a tool that raised —
@@ -256,15 +277,16 @@ class ToolBroker:
         if session is None:
             raise ToolError(qualified, f"{spec.server} is not connected")
 
+        deadline = timeout if timeout is not None else self.timeout_for(spec.server)
         try:
             # Serialised per broker. The servers are single SQLite writers and a live call makes
             # one tool call at a time anyway; contention here would be a bug elsewhere.
-            async with self._lock, asyncio.timeout(CALL_TIMEOUT_SECONDS):
+            async with self._lock, asyncio.timeout(deadline):
                 result = await session.call_tool(spec.name, arguments or {})
         except TimeoutError as exc:
             raise ToolError(
                 qualified,
-                f"no answer within {CALL_TIMEOUT_SECONDS:.0f}s",
+                f"no answer within {deadline:.0f}s",
                 spoken="That is taking longer than it should — let me have a colleague confirm it.",
             ) from exc
         except Exception as exc:  # noqa: BLE001
