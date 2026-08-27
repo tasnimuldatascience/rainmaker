@@ -1391,7 +1391,12 @@ class Agenda:
                 {
                     "amount": self.quote.total,
                     "currency": self.quote.currency,
-                    "description": f"{self.quote.tier}, {self.quote.seats} seats",
+                    # THE TENANT'S WORD, NOT "SEATS". `Quote.units` already knows what is being
+                    # counted — the whole reason `unit_name` exists is that a GPU cloud sells
+                    # hours and a roaster sells kilos. Hardcoded here, the last thing a GPU
+                    # buyer saw before entering a card was "On-demand, 23360 seats", which is
+                    # the one screen on the call where a wrong word costs the sale.
+                    "description": f"{self.quote.tier}, {self.quote.units}",
                     "email": self.contact.email,
                     "company": self.quote.company,
                     "period": self.quote.period,

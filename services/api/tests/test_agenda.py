@@ -1419,3 +1419,31 @@ class TestTheComparisonIsTheTenantsWords:
         before = len(llm.calls)
         await collect(agenda.respond("how do you compare to a chat widget?"))
         assert not llm.calls[before:], llm.calls[before:]
+
+
+class TestTheCheckoutSaysWhatIsBeingBought:
+    """The last screen before somebody enters a card is the one where a wrong word costs the
+    sale. It was hardcoded to "seats" — so a GPU buyer's checkout read "On-demand, 23360 seats",
+    on a product with no seats in it, from a platform whose whole multi-tenancy claim is that it
+    stopped calling everything a seat."""
+
+    async def test_the_line_item_uses_the_tenants_own_unit(self):
+        import importlib.util
+        from pathlib import Path
+
+        spec_file = Path(__file__).resolve().parents[3] / "scripts" / "demo-embed.py"
+        module_spec = importlib.util.spec_from_file_location("demo_embed", spec_file)
+        demo_embed = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(demo_embed)
+
+        agenda, tools = build(spec=demo_embed.tessera())
+        await collect(agenda.begin())
+        await collect(agenda.respond("we need about 32 H100s for a month"))
+        await collect(agenda.respond("what does that cost?"))
+        await collect(agenda.respond("great, how do I get started?"))
+
+        sent = [c for c in tools.calls if c[0] == "payments.create_checkout"]
+        assert sent, "no checkout was created"
+        description = sent[-1][1]["description"]
+        assert "GPU-hour" in description, description
+        assert "seats" not in description, description
