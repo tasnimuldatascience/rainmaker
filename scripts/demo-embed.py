@@ -192,6 +192,10 @@ def tessera() -> AgentSpec:
                     "live capacity by region and card, with the hourly rate next to each one, "
                     "so the number being discussed is one they can see"
                 ),
+                because=(
+                    "you can see what is free before you talk to anybody, and take it today "
+                    "rather than joining a quota queue"
+                ),
                 scroll_to="Available now",
                 answers=("capacity", "available", "region", "h100", "a100", "what do you have"),
             ),
@@ -201,6 +205,9 @@ def tessera() -> AgentSpec:
                 shows=(
                     "on-demand against reserved, per GPU-hour, with what the commitment "
                     "actually buys"
+                ),
+                because=(
+                    "you pay per second of node time, and it stops when the node does"
                 ),
                 scroll_to="Per GPU-hour",
                 answers=("price", "pricing", "cost", "rate", "how much", "reserved"),

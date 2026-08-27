@@ -1204,7 +1204,13 @@ class Agenda:
         ours = self.session.spec.company if self.session.spec else "your company"
         theirs = self.session.prospect.company or self.contact.company_guess or "their company"
 
-        async for event in self._say(f"What you're looking at is {stop.shows}."):
+        # BOTH SENTENCES, WHEN THE TENANT WROTE BOTH. What is on screen, and why it matters —
+        # said together so the pair is one utterance rather than a statement followed by a
+        # pause while a model decides what to add.
+        opening = f"What you're looking at is {stop.shows}."
+        if stop.because:
+            opening = f"{opening} And that means {stop.because}."
+        async for event in self._say(opening):
             yield event
 
         # NO PAGE TEXT IN THIS PROMPT AT ALL. It was cut from 700 characters to 240 and the
@@ -1217,6 +1223,11 @@ class Agenda:
         # What is left is the only thing the model is being asked for and the only thing it
         # cannot get factually wrong — the connection between a product and a problem the buyer
         # described in their own words a moment ago.
+        if stop.because:
+            # The tenant answered "why does this matter" themselves. Asking the model for a
+            # second opinion on it produces exactly the sentence this field exists to replace.
+            return
+
         problem = self.need.means if self.need is not None else ""
         because = f" They are dealing with this: {problem}." if problem else ""
         async for event in self._speak(

@@ -1447,3 +1447,61 @@ class TestTheCheckoutSaysWhatIsBeingBought:
         description = sent[-1][1]["description"]
         assert "GPU-hour" in description, description
         assert "seats" not in description, description
+
+
+class TestTheTourExplainsItselfWhenTheTenantSaidHow:
+    """The sentence after "what you're looking at is…" was the model's, and it got it wrong in
+    four different shapes across four recorded calls: it narrated the page badly, then narrated
+    the PROSPECT instead, then invented "392 GPUs for free", then slipped into the buyer's
+    pronouns ("this would give US live capacity, compared to OUR current setup").
+
+    `TourStop.because` lets the tenant answer it once. When they have, the model is not asked.
+    """
+
+    @staticmethod
+    def spec_with_reason():
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import TourStop
+
+        base = nadia_spec()
+        return replace(
+            base,
+            tour=(
+                replace(
+                    base.tour[0],
+                    because="you stop losing the buyers who arrive at eleven at night",
+                ),
+            ),
+        )
+
+    async def test_the_reason_is_spoken_with_what_is_on_screen(self):
+        agenda, _ = build(spec=self.spec_with_reason())
+        await collect(agenda.begin())
+        said = spoken(await collect(agenda.respond("show me what it looks like")))
+        assert "And that means you stop losing the buyers" in said, said
+
+    async def test_the_model_is_not_asked_for_a_second_opinion_on_it(self):
+        agenda, _ = build(spec=self.spec_with_reason())
+        await collect(agenda.begin())
+        llm = agenda.session.pipeline.llm
+        before = len(llm.calls)
+        await collect(agenda.respond("show me what it looks like"))
+        assert not [p for p in llm.calls[before:] if "screen-sharing" in p]
+
+    async def test_a_tenant_who_wrote_no_reason_still_gets_one(self):
+        """The field is optional. Without it the model does the connecting, which is what it is
+        for — it is only the factual half that was taken away."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        llm = agenda.session.pipeline.llm
+        before = len(llm.calls)
+        await collect(agenda.respond("show me what it looks like"))
+        assert [p for p in llm.calls[before:] if "screen-sharing" in p]
+
+    def test_the_reason_survives_a_round_trip(self):
+        from rainmaker.agents.spec import AgentSpec
+
+        spec = self.spec_with_reason()
+        back = AgentSpec.from_dict(spec.as_dict())
+        assert back.tour[0].because == spec.tour[0].because

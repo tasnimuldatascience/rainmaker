@@ -289,6 +289,17 @@ class TourStop:
     #: What this page demonstrates. Handed to the model as narration context so it talks about
     #: what is on the screen rather than about what it imagines is on the screen.
     shows: str
+    #: WHY THIS PAGE MATTERS TO A BUYER, in the tenant's words, said straight after `shows`.
+    #:
+    #: Optional, and the model writes it when it is empty — which is how this started, and the
+    #: model got it wrong in four different ways across four recorded calls: it narrated the
+    #: page (badly), then narrated the PROSPECT instead, then invented "392 GPUs for free", then
+    #: slipped into the buyer's pronouns — "this would give US live capacity, compared to OUR
+    #: current setup". Four failures, four different shapes, one sentence.
+    #:
+    #: Completes "…and that means ___", so it is written as a consequence rather than a
+    #: sentence: "you stop waiting on a quota request to train anything".
+    because: str = ""
     #: A phrase to scroll into view first, so the screen shows the thing being said.
     scroll_to: str = ""
     #: Buyer concerns this stop answers, so the agent can go where the question went.
@@ -583,6 +594,7 @@ class AgentSpec:
             "tour": [
                 {
                     "url": t.url, "label": t.label, "shows": t.shows,
+                    "because": t.because,
                     "scroll_to": t.scroll_to, "answers": list(t.answers),
                 }
                 for t in self.tour
@@ -651,6 +663,7 @@ class AgentSpec:
             tour=tuple(
                 TourStop(
                     url=t["url"], label=t.get("label", ""), shows=t.get("shows", ""),
+                    because=t.get("because", ""),
                     scroll_to=t.get("scroll_to", ""), answers=tuple(t.get("answers", ())),
                 )
                 for t in raw.get("tour", [])
