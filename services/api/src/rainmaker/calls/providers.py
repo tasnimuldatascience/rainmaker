@@ -35,7 +35,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..agents.spec import DEFAULT_VOICE, VOICE_CATALOGUE
 from .clauses import split_clauses, take_speakable
+from .speech import say
 from .pipeline import Clip, LanguageModel, SpeechToText, TextToSpeech
 
 log = logging.getLogger("rainmaker.calls.providers")
@@ -354,33 +356,10 @@ class KokoroTextToSpeech(TextToSpeech):
 
     name = "kokoro"
 
-    #: The voices a tenant may pick, and the Kokoro voice behind each.
-    #:
-    #: CHOSEN BY GRADE, NOT BY NAME. Kokoro publishes a quality grade per voice that reflects how
-    #: much training data it had, and it tracks how stable and natural each one is. There are
-    #: fifty-four voices in the pack; this exposes the ones worth putting on a sales call.
-    #:
-    #: The demo agent was on `bf_isabella`, which is graded C — and measurably the worst of the
-    #: set on the one thing that matters here: it peaks at 1.14 on our own quote sentence, which
-    #: is above full scale. That is digital clipping, it is a hard distortion, and it is one of
-    #: the things people mean when they say a voice sounds synthetic. `af_heart` (grade A) reads
-    #: the same sentence peaking at 0.45.
-    #:
-    #: `af_nicole` is graded B- and is excluded on measurement rather than grade: the same line
-    #: takes 19.6 seconds against 12 for the others, because it is a breathy ASMR voice. On a
-    #: sales call that is not a voice, it is a mood.
-    VOICES: dict[str, tuple[str, str]] = {
-        # name             kokoro     lang      grade
-        "female-warm": ("af_heart", "en-us"),  # A
-        "female-clear": ("af_bella", "en-us"),  # A-
-        "female-british": ("bf_emma", "en-gb"),  # B-
-        "male-warm": ("am_michael", "en-us"),  # C+
-        "male-british": ("bm_george", "en-gb"),  # C
-        # Kept because specs in the wild carry them: `liv` shipped as the default voice name,
-        # and `male-us` was the only American male. Both point at the best voice of their kind.
-        "liv": ("af_heart", "en-us"),
-        "male-us": ("am_michael", "en-us"),
-    }
+    #: The voices a tenant may pick. Defined in `agents/spec.py` and imported rather than
+    #: restated, because a copy of this table lived here and the two stopped agreeing — see the
+    #: comment on `VOICE_CATALOGUE`. The engine and the validator now cannot disagree.
+    VOICES = VOICE_CATALOGUE
 
     #: Natural pace. This was 1.05 on the theory that synthesised speech reads as slower than it
     #: measures — true of a monotone reader, and the wrong correction here: sped up, Kokoro
@@ -393,7 +372,7 @@ class KokoroTextToSpeech(TextToSpeech):
         model: Path = KOKORO_MODEL,
         voices: Path = KOKORO_VOICES,
         *,
-        voice: str = "liv",
+        voice: str = DEFAULT_VOICE,
         speed: float | None = None,
     ) -> None:
         self.model_path = model
@@ -462,13 +441,18 @@ class KokoroTextToSpeech(TextToSpeech):
     PEAK_CEILING = 0.89
 
     def _synth(self, text: str) -> Clip:
-        kokoro_voice, lang = self.VOICES.get(self.voice, self.VOICES["female-warm"])
+        # THE VOICE READS `spoken`, THE SCREEN READS `text`. Kokoro is handed a string with the
+        # markdown taken out, the abbreviations expanded and the URLs made pronounceable; the
+        # caption keeps the version a person would rather look at. See `calls/speech`.
+        spoken = say(text)
+        kokoro_voice, lang = self.VOICES.get(self.voice, self.VOICES[DEFAULT_VOICE])
         started = time.perf_counter()
         samples, rate = self._kokoro.create(
-            text, voice=kokoro_voice, speed=self.speed, lang=lang
+            spoken, voice=kokoro_voice, speed=self.speed, lang=lang
         )
         return Clip(
             text=text,
+            spoken=spoken,
             wav=to_wav(self._level(samples), rate),
             sample_rate=rate,
             duration_ms=len(samples) / rate * 1000,
@@ -488,6 +472,26 @@ class KokoroTextToSpeech(TextToSpeech):
         Downwards only, deliberately. Normalising quiet clips UP would make the level jump
         between one sentence and the next, which is worse than a quiet voice and much harder to
         diagnose.
+
+        WHY THERE IS NO CLAUSE-TO-CLAUSE LOUDNESS MATCHING HERE, having gone looking for it. A
+        reply is cut into clauses for latency and each is synthesised without knowledge of its
+        neighbours, so the obvious worry is that their levels step mid-sentence. Measured over
+        this agent's own script, per-clause RMS:
+
+            af_heart   0.0730 - 0.0884   median 0.0773   spread 1.21x
+            af_bella   0.0770 - 0.0906   median 0.0841   spread 1.18x
+            bf_emma    0.0933 - 0.1145   median 0.1010   spread 1.23x
+
+        About 1.7dB inside a voice, which is at the edge of audible — and the medians differ by
+        30% BETWEEN voices, so any fixed target would change a voice's character rather than
+        even out its clauses. A self-calibrating target would fix that, and cannot live here:
+        `state.tts` is one process-wide instance shared by every concurrent call, so running
+        level state would mix clauses from different conversations and different voices.
+
+        The measurement did find something real — the short opening chunk is consistently the
+        loudest clause of a turn on all three voices — but 1.7dB of it, and the fix for it is
+        stateful. Left alone on purpose; the note is here so the next person measures before
+        adding a compressor rather than after.
         """
         import numpy as np
 
@@ -559,10 +563,15 @@ class SilentTextToSpeech(TextToSpeech):
             index += 1
 
     def _estimate(self, text: str, index: int) -> Clip:
+        # The browser is the synthesiser on this path, so it gets the spoken spelling too —
+        # `speechSynthesis` reads "asterisk asterisk" as readily as Kokoro does. The estimate is
+        # measured on the spoken form because that is the string that will be read aloud.
+        spoken = say(text)
         return Clip(
             text=text,
+            spoken=spoken,
             wav=b"",
-            duration_ms=len(text) / self.CHARS_PER_SECOND * 1000,
+            duration_ms=len(spoken) / self.CHARS_PER_SECOND * 1000,
             index=index,
             browser_voice=True,
         )

@@ -30,6 +30,7 @@ marketing site, it selects a published agent, and it authorises nothing.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -44,6 +45,7 @@ from rainmaker.agents.spec import (  # noqa: E402
     Competitor,
     Fact,
     Guardrails,
+    Need,
     Tier,
     TourStop,
 )
@@ -52,7 +54,10 @@ from rainmaker.agents.store import AgentStore  # noqa: E402
 TENANT, AGENT = "tessera", "alex"
 
 #: Where their own tour opens. Their site, not ours — the whole point of the guide step.
-SITE = "http://localhost:5173/demo/tessera.html"
+# Same override as `agents.store.CONSOLE`, for the same reason: vite takes the next free
+# port when 5173 is busy, and a tour pinned to a port that moved drives to a dead page.
+CONSOLE = os.environ.get("RAINMAKER_CONSOLE", "http://localhost:5173").rstrip("/")
+SITE = f"{CONSOLE}/demo/tessera.html"
 
 
 def tessera() -> AgentSpec:
@@ -75,7 +80,7 @@ def tessera() -> AgentSpec:
         # Her own face, not a borrowed one. Two agents wearing one photograph is a demo of a
         # template rather than of multi-tenancy, and the face is the first thing a buyer
         # notices. `scripts/fetch-face.py` picked it out of the same Apache-2.0 set of
-        # synthetic portraits Liv came from.
+        # synthetic portraits Nadia came from.
         voice="female-warm",
         portrait="/agent/mara.jpg",
         knowledge=(
@@ -124,6 +129,59 @@ def tessera() -> AgentSpec:
                 "control-plane fee on top.",
                 source="price list",
                 topic="pricing",
+            ),
+        ),
+        # WHY ANYBODY BUYS GPU-HOURS, AND HOW TO SPOT EACH REASON IN WHAT RESEARCH FOUND.
+        #
+        # Without these the agent can read a website and do nothing with it — which is exactly
+        # what happened on a real call: it opened by reading four job titles off a careers page
+        # back to the person who wrote them, on a call about renting GPUs. A seller does not
+        # recite a finding, they say what it suggests and check.
+        #
+        # Ordered strongest first: the more specific the signal, the more it is worth opening on.
+        needs=(
+            Need(
+                signals=(
+                    "machine learning", "deep learning", "ml engineer", "training", "train",
+                    "model", "llm", "pytorch", "tensorflow", "inference", "fine-tun",
+                    "data scien", "research engineer", "computer vision", "nlp",
+                ),
+                means=(
+                    "they are training or serving models already, and the thing that limits "
+                    "them is how much GPU they can get hold of"
+                ),
+                opener=(
+                    "it looks like you are training or serving models already, so the thing "
+                    "in your way is how much GPU you can actually get hold of"
+                ),
+                ask="what are you training at the moment, and what are you training it on?",
+            ),
+            Need(
+                signals=("aws", "gcp", "azure", "cloud", "kubernetes", "terraform", "devops"),
+                means=(
+                    "they already run in the cloud, so they will know exactly what a GPU quota "
+                    "queue feels like"
+                ),
+                opener=(
+                    "it looks like you already run in the cloud, so you will know exactly what "
+                    "waiting on a GPU quota feels like"
+                ),
+                ask="are you getting the GPU quota you ask for, or waiting on it?",
+            ),
+            Need(
+                signals=(
+                    "research and development", "r&d", "research engineer", "hiring",
+                    "engineer", "product",
+                ),
+                means=(
+                    "they are building something new, and new work runs into compute long "
+                    "before anybody budgets for it"
+                ),
+                opener=(
+                    "it looks like you are building something new, and new work tends to run "
+                    "into compute long before anybody has budgeted for it"
+                ),
+                ask="is any of that work model training, or is it mostly product engineering?",
             ),
         ),
         tour=(

@@ -550,14 +550,19 @@
      a shared screen looks like. `cover` on a still of the destination is what it used to be, and
      everybody who saw it said the browser was not doing anything. */
   .screen-viewport { position: relative; overflow: hidden; min-block-size: 0; }
+  /* CONTAIN, NOT COVER. The capture is a 1280x800 browser viewport and the panel is wider and
+     shorter than that — so `cover` scaled the image to the width and threw away the bottom
+     quarter of the page. A screen share that silently crops a quarter of the site is the
+     "browser isn't showing the site properly" everyone reported. Letterboxed is what a real
+     screen share of a differently-shaped window looks like. */
   .screen-frame {
     display: block; inline-size: 100%; block-size: 100%;
-    object-fit: cover; object-position: top center;
+    object-fit: contain; object-position: top center;
   }
   .screen-frame[data-scrolling] {
     /* `auto` and no `object-fit`: the image is a picture of a whole page and must keep the
        proportions it was taken at. `fill` against a computed height is what squashed it. */
-    block-size: auto; object-fit: unset; will-change: transform;
+    block-size: auto; object-fit: unset; object-position: unset; will-change: transform;
     /* Long and eased: a page scrolling is a physical motion, and 2.4s at this curve is what a
        person's thumb does. Snapping to the destination reads as a cut. */
     transition: transform 2.4s cubic-bezier(0.33, 0, 0.15, 1);
@@ -639,15 +644,23 @@
   /* Nothing being shared: she is the call, so she fills it. */
   .meet-hero {
     position: relative; justify-self: center; align-self: center;
-    inline-size: min(38rem, 100%); aspect-ratio: 4 / 3;
+    inline-size: min(30rem, 100%); aspect-ratio: 1 / 1;
     border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line-strong);
     box-shadow: var(--shadow-3);
   }
 
   /* Something is being shared: she shrinks into the corner, the way a presenter tile does. */
+  /* SQUARE, BECAUSE THE FACE IS SQUARE. Both faces are 1:1 -- the portrait is a 512x512
+     photograph and the drawn rig is a 200x200 viewBox -- and these frames were 4/3. With
+     `object-fit: cover` a landscape frame around a square image throws away a tenth of the
+     height at each end, and what lives in the bottom tenth is the neck and the top of the
+     shoulders. That is the whole of "she has no neck": not a missing shape, a crop. The drawn
+     rig grew a neck and a jacket and they were cropped off in the same place, which is why
+     drawing them appeared to change nothing.
+     Anything reframed here must stay square or the crop comes back. */
   .meet-self {
     position: absolute; inset-block-end: var(--s-4); inset-inline-end: var(--s-4);
-    inline-size: 13.5rem; aspect-ratio: 4 / 3.2; border-radius: var(--r-md); overflow: hidden;
+    inline-size: 12rem; aspect-ratio: 1 / 1; border-radius: var(--r-md); overflow: hidden;
     border: 1px solid var(--line-strong); box-shadow: var(--shadow-3); z-index: 3;
     background: var(--surface-1); transition: border-color var(--med), box-shadow var(--med);
   }
@@ -675,7 +688,8 @@
     line-clamp: 3; overflow: hidden;
   }
   .meet-caption[data-partial] { color: rgb(255 255 255 / 0.62); font-style: italic; }
-  .meet-stage:has(.meet-self) .meet-caption { inset-inline-end: 15rem; margin-inline: 0 auto; }
+  /* Clear of the pip, which is 12rem wide plus its inset. */
+  .meet-stage:has(.meet-self) .meet-caption { inset-inline-end: 13.5rem; margin-inline: 0 auto; }
 
   .meet-toast {
     position: absolute; inset-block-start: var(--s-6); inset-inline: 0; margin-inline: auto;
@@ -778,7 +792,7 @@
     background: var(--accent-wash); color: var(--fg);
   }
   .lobby-tile {
-    position: relative; inline-size: min(30rem, 100%); aspect-ratio: 4 / 3;
+    position: relative; inline-size: min(24rem, 100%); aspect-ratio: 1 / 1;
     border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line-strong);
     box-shadow: var(--shadow-3); background: var(--surface-1);
   }

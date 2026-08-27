@@ -5,11 +5,11 @@
 OFF UNLESS CONFIGURED, AND THAT IS THE WHOLE DESIGN. Every other server here works on a fresh
 clone with nothing set up. This one cannot: sending mail needs an account somewhere, and the
 project's rule is that a reviewer can clone and run without one. So it ships disabled, the
-broker reports it as unavailable with the reason attached, and the agenda knows before Liv
+broker reports it as unavailable with the reason attached, and the agenda knows before Nadia
 promises to send anything.
 
 WHAT IT DOES WHEN DISABLED IS THE INTERESTING PART. `draft_recap` still works with no SMTP at
-all — it composes the message and hands it back. So the default experience is that Liv writes
+all — it composes the message and hands it back. So the default experience is that Nadia writes
 the follow-up, shows it to the prospect on screen, and says a person will send it. That is an
 honest degradation rather than a dead feature: the drafting is the hard part and it is fully
 demonstrated.
@@ -34,8 +34,8 @@ SMTP_HOST = os.environ.get("RAINMAKER_SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("RAINMAKER_SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("RAINMAKER_SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("RAINMAKER_SMTP_PASSWORD", "")
-FROM_ADDRESS = os.environ.get("RAINMAKER_FROM_ADDRESS", SMTP_USER or "liv@rainmaker.invalid")
-FROM_NAME = os.environ.get("RAINMAKER_FROM_NAME", "Liv at Rainmaker")
+FROM_ADDRESS = os.environ.get("RAINMAKER_FROM_ADDRESS", SMTP_USER or "nadia@rainmaker.invalid")
+FROM_NAME = os.environ.get("RAINMAKER_FROM_NAME", "Nadia at Rainmaker")
 
 _ADDRESS = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 

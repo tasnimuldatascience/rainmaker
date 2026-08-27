@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-517%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-611%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -128,7 +128,13 @@ RAINMAKER_VOICE_SPEED=1.0  # Kokoro clips its own phrase endings above about 1.0
                            # (voices are chosen by Kokoro's published grade — see providers.py)
 RAINMAKER_MAX_CHARGE=…     # the ceiling above which a person has to sign, in minor units
 RAINMAKER_CALLS_PER_VISITOR_HOUR=…   # raise the rate limit; the screenshot script needs this
+RAINMAKER_CONSOLE=http://localhost:5173   # where the console is, if vite took another port
+RAINMAKER_API=http://127.0.0.1:8000       # where the API is, for the dev-server proxy
 ```
+
+The last two matter more than they look: vite takes the next free port when its default is busy,
+so a machine with something already on 5173 gets 5174 without being asked — and the demo tour
+drives a live browser to pages on that host.
 
 ---
 
@@ -516,10 +522,10 @@ worse than the call it prevented.
 
 ```bash
 npm test                       # 53 tests — syncing, text editing, the call surface
-pytest                         # 464 tests — research, syncing, the API, the live call, the tools
+pytest                         # 558 tests — research, syncing, the API, the live call, the tools
 ```
 
-517 tests in total. None of them load a language model: a test that spends six seconds on
+611 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |
@@ -538,6 +544,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `test_agents.py` | The line between what a customer may configure and what the platform enforces — a tenant who can switch off the AI disclosure is a liability the vendor inherits |
 | `test_lipsync.py` | The spectrogram her mouth is driven by — a mel that is subtly wrong makes her lip-sync confidently to the wrong sounds, which looks like a bad model rather than a bad constant |
 | `test_avatar.py` | That the face admits what it is: synthetic, and not lip-syncing unless a provider is actually doing it |
+| `test_speech.py` | What the voice is handed as opposed to what the screen is shown — that no markdown, abbreviation or URL reaches a synthesiser in a spelling it says wrong |
 | `test_readme.py` | That these counts are the counts. A badge is an image, and nobody proofreads an image |
 
 ### The bug the API tests found immediately
@@ -622,4 +629,4 @@ page was fetched. See [ARCHITECTURE.md](ARCHITECTURE.md) for the decisions and w
 
 ## Licence
 
-MIT. Not affiliated with River. An original system exploring the same problem.
+MIT.

@@ -5,7 +5,7 @@ dataset. Each depicts **no real person**.
 
 | File | Agent | Original | Licence |
 |---|---|---|---|
-| `liv.jpg` | Liv, at Rainmaker | `SFHQ_pt1_00000185` | Apache-2.0 |
+| `nadia.jpg` | Nadia, at Rainmaker | `SFHQ_pt1_00000185` | Apache-2.0 |
 | `mara.jpg` | Mara, at Tessera Compute | `SFHQ_pt1_00002743` | Apache-2.0 |
 | `alex.jpg` | unused — kept as a second option | SFHQ | Apache-2.0 |
 

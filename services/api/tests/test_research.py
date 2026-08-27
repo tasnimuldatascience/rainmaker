@@ -380,3 +380,52 @@ def _fail_on_dns(real, opened: list[object]):
         return real(host, *args, **kwargs)
 
     return guard
+
+
+class TestAJobTitleIsANounPhraseNotASentence:
+    """`_ROLE` finds a department word at the start of a line and takes forty more characters,
+    which on a real careers page is usually the rest of a marketing sentence. Run against
+    stripe.com it reported "AI is replatforming the global economy" as an open role.
+
+    This matters more than a wrong field in a dossier: the opening line of a call speaks the
+    strongest finding verbatim, so a sentence that survives here is read out loud to the person
+    who wrote the page it came from.
+    """
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Research and Development Engineer",
+            "Sales and Marketing Specialist",
+            "Production Associate",
+            "Product Manager",
+            "Machine Learning Engineer",
+            "Senior Data Scientist",
+            "Head of Sales",
+            "Director of Product",
+        ],
+    )
+    def test_a_real_title_survives(self, title: str):
+        from rainmaker.research.extract import _is_job_title
+
+        assert _is_job_title(title), title
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "AI is replatforming the global economy",
+            "Products and pricing Pricing Atlas Authorizatio",
+            "Research and Development is how we grow",
+            "Marketing team is growing fast every single year",
+        ],
+    )
+    def test_a_sentence_that_starts_with_a_department_word_does_not(self, line: str):
+        from rainmaker.research.extract import _is_job_title
+
+        assert not _is_job_title(line), line
+
+    @pytest.mark.parametrize("bare", ["Product", "Sales", "Engineering"])
+    def test_a_bare_department_is_not_a_role(self, bare: str):
+        from rainmaker.research.extract import _is_job_title
+
+        assert not _is_job_title(bare), bare

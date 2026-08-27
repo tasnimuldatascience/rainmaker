@@ -1,4 +1,4 @@
-"""The call itself: what Liv is trying to do right now, and what she is allowed to do about it.
+"""The call itself: what Nadia is trying to do right now, and what she is allowed to do about it.
 
 THIS IS THE FILE THAT MAKES IT A PRODUCT RATHER THAN A CHATBOT. A chatbot answers whatever is in
 front of it. A demo call has somewhere to get to — understand the business, show the thing
@@ -184,6 +184,37 @@ _INTENTS: tuple[tuple[Step, re.Pattern[str]], ...] = (
     ),
 )
 
+#: Somebody pushing back rather than asking a question.
+#:
+#: "SO WHAT" IS THE COMMONEST FIRST OBJECTION AND NOTHING HANDLED IT. It matches no intent, so
+#: it fell through to an ordinary discovery turn — and a 1.5B model handed "find out what they
+#: are trying to fix" and a challenge does the one thing that ends a call: it mirrors. Observed,
+#: verbatim, on a real call:
+#:
+#:     prospect  so what
+#:     agent     That looks interesting. Could you tell me why you think these roles are
+#:               important?
+#:
+#: The agent asked the buyer to justify the buyer's own job adverts. A challenge is answered, in
+#: one sentence, with a reason — never with a question back.
+def _opens(text: str) -> str:
+    """`text` as the start of a sentence, with the rest of it left alone.
+
+    `str.capitalize` is the wrong tool and was the first thing tried: it lower-cases everything
+    after the first character, so "Research and Development Engineer" came back as "Research and
+    development engineer" and an acronym came back ruined.
+    """
+    text = text.strip()
+    return text[:1].upper() + text[1:] if text else ""
+
+
+_CHALLENGE = re.compile(
+    r"^\s*(?:so what|and\??|ok(?:ay)?[.?!]*$|meh|why (?:should i|would i|do i)"
+    r"|what'?s the point|not interested|we'?re (?:fine|all set)|don'?t need|why does that matter"
+    r"|who cares|and\s+that\s+matters\s+because)",
+    re.IGNORECASE,
+)
+
 #: The model may end a reply with one of these to say "this step is done". A hint, not an
 #: instruction — see the module docstring.
 _MARKER = re.compile(r"\[\[(?P<step>[a-z_]+)\]\]", re.IGNORECASE)
@@ -236,8 +267,9 @@ PLAN: dict[Step, StepPlan] = {
     ),
     Step.DISCOVERY: StepPlan(
         objective=(
-            "Find out what they are trying to fix and how big their team is. One question at a "
-            "time. Do not describe the product yet."
+            "Find out how much of what you sell they would actually need, and what is getting "
+            "in the way today. One question at a time. Never ask them to explain their own "
+            "business back to you. Do not describe the product yet."
         ),
         max_turns=3,
         next_step=Step.GUIDE,
@@ -334,6 +366,8 @@ class Agenda:
         self.wants_human = False
         #: True once the call has been written down. See `end`.
         self.closed = False
+        #: What research suggests they need, once it has been worked out. See `_diagnose`.
+        self.need: Any = None
 
         #: True once the disclosure has actually been delivered.
         self.opened = False
@@ -521,6 +555,14 @@ class Agenda:
         # tour means the NEXT stop, and a step that only runs on arrival would have answered it
         # by talking about the page already on screen. Asking the price twice, by contrast,
         # should not rebuild the same quote — the model answers that.
+        # A CHALLENGE IS ANSWERED, NOT REFLECTED. Checked before the intents, because "so what"
+        # carries no intent and the fall-through is an ordinary turn — which is where a small
+        # model asks the buyer to justify the buyer's own business.
+        if _CHALLENGE.match(text) and self.step in (Step.OPENING, Step.DISCOVERY, Step.GUIDE):
+            async for event in self._answer_challenge(text):
+                yield event
+            return
+
         wanted = detect_intent(text) or self._tenant_intent(text)
         if wanted and (wanted is not self.step or wanted is Step.GUIDE):
             async for event in self._enter(wanted, said=text):
@@ -534,7 +576,7 @@ class Agenda:
                 reply = event.result.response
             yield event
         if reply:
-            self.transcript_lines.append(f"Liv: {reply}")
+            self.transcript_lines.append(f"Nadia: {reply}")
 
         _, marker = read_marker(reply)
         plan = PLAN.get(self.step)
@@ -594,6 +636,16 @@ class Agenda:
         async for event in self._speak(said or "(continue)"):
             yield event
 
+    def _needs_line(self) -> str:
+        """What this call is trying to establish, in the tenant's own words."""
+        spec = self.session.spec
+        unit = next((t.unit_name for t in (spec.pricing if spec else ()) if t.unit_amount), "")
+        if self.need is not None:
+            return f" You believe {self.need.means}." + (
+                f" You are trying to find out how many {unit}s they need." if unit else ""
+            )
+        return f" You are trying to find out how many {unit}s they need." if unit else ""
+
     def _retarget(self, step: Step) -> None:
         """Point the prompt at the current step's objective.
 
@@ -611,9 +663,12 @@ class Agenda:
         if not plan:
             return
         spec = self.session.spec
+        # THE NEED TRAVELS WITH THE OBJECTIVE. Working out what they need in the opening and
+        # then not telling the model about it again is how a call drifts back into small talk
+        # by the second question.
         self.session.profile.objective = (
             spec.objective_for(str(step), plan.objective) if spec else plan.objective
-        )
+        ) + self._needs_line()
 
     async def _speak(self, prompt: str) -> AsyncIterator[AgendaEvent]:
         """Let the model say something for the current step."""
@@ -624,14 +679,14 @@ class Agenda:
                 reply = event.result.response
             yield event
         if reply:
-            self.transcript_lines.append(f"Liv: {reply}")
+            self.transcript_lines.append(f"Nadia: {reply}")
 
     async def _say(self, line: str) -> AsyncIterator[AgendaEvent]:
         """Say a fixed line — no model involved.
 
         Used wherever the words carry a commitment: a time, a confirmation, a disclosure.
         """
-        self.transcript_lines.append(f"Liv: {line}")
+        self.transcript_lines.append(f"Nadia: {line}")
         self.session.record("agent", line)
         self.session.history.append({"role": "assistant", "content": line})
         budget = LatencyBudget()
@@ -669,9 +724,99 @@ class Agenda:
         return None
 
     # ── the steps that do something ─────────────────────────────────────
+    async def _answer_challenge(self, said: str) -> AsyncIterator[AgendaEvent]:
+        """They pushed back. Give a reason, not a question.
+
+        "So what" is the commonest first objection and nothing handled it: it matches no intent,
+        so it fell through to an ordinary discovery turn, and a 1.5B model handed "find out what
+        they are trying to fix" plus a challenge does the one thing that ends a call — it
+        mirrors. Observed, verbatim:
+
+            prospect  so what
+            agent     That looks interesting. Could you tell me why you think these roles are
+                      important?
+
+        It asked the buyer to justify the buyer's own job adverts. What a seller does with a
+        challenge is answer it in one sentence with a concrete reason, and only then ask.
+        """
+        spec = self.session.spec
+        sells = spec.knowledge[0].text if spec and spec.knowledge else "what you sell"
+        why = next(
+            (fact.text for fact in (spec.knowledge if spec else ()) if fact.topic == "why"),
+            "",
+        )
+        reason = f" The reason people move is: {why}" if why else ""
+        async for event in self._speak(
+            f"(They pushed back with \"{said.strip()}\". Do NOT ask them a question about their "
+            f"own business and do NOT ask why something matters to them. In ONE sentence, say "
+            f"concretely what {sells} would change for someone in their position.{reason} Then "
+            f"ask one short question about their own setup.)"
+        ):
+            yield event
+
+    def _diagnose(self) -> tuple[str, Any]:
+        """What research found, and what it suggests they need. Either may be empty.
+
+        THIS IS THE STEP THAT WAS MISSING. Research produced facts about the BUYER and the agent
+        sold a PRODUCT, and nothing joined them — so the agent read the facts out. The tenant
+        writes down what each signal means for what they sell (`spec.needs`), and this picks the
+        strongest match across everything research returned.
+
+        Scored over the WHOLE fact list rather than per fact, because the evidence for a need is
+        usually spread: a careers page mentioning research engineers and a stack listing PyTorch
+        are one hypothesis, not two.
+        """
+        spec = self.session.spec
+        facts = self.session.prospect.facts
+        if not spec or not spec.needs or not facts:
+            return "", None
+
+        corpus = " ".join(facts)
+        # A need with nothing to say is skipped rather than spoken. `validate` refuses these at
+        # publish time; this is the second line, because a spec can also arrive from a database
+        # written before that check existed, and the failure mode is a sentence with a hole in
+        # it read out loud to a customer.
+        usable = [n for n in spec.needs if n.opener.strip() and n.ask.strip()]
+        if not usable:
+            return "", None
+        ranked = sorted(usable, key=lambda need: need.score(corpus), reverse=True)
+        best = ranked[0]
+        if not best.score(corpus):
+            return "", None
+
+        # The fact that carries the most of that need's signal, narrowed to the part of it that
+        # did the carrying — see `Need.narrow`. Handing over the whole fact means handing over a
+        # list, and a list in the context is a list in the greeting.
+        source = max(facts, key=best.score)
+        if not best.score(source):
+            return "", best
+
+        # ONLY A LIST MAKES A QUOTABLE NOUN PHRASE, and this is decided here rather than in
+        # `narrow` because it is a question about the sentence it lands in, not about the fact.
+        # Research facts come in two shapes. "Technology on their site: express, rails, aws" and
+        # "Currently hiring (4 open roles): ..." are enumerations, and one item out of one is a
+        # thing a person can say they noticed. "How they charge: sales assisted" is a field with
+        # a value, and reading it into the same slot produced "sales assisted stood out" —
+        # grammatical, and not English anybody speaks.
+        #
+        # So a non-list fact still selects the need; it just does not get quoted. She says what
+        # she thinks rather than what she read, which was the point of the whole mechanism.
+        _, separator, body = source.partition(": ")
+        if not separator or "," not in body:
+            return "", best
+        return best.narrow(source), best
+
     async def _open(self) -> AsyncIterator[AgendaEvent]:
-        """A greeting that proves she read their site. The disclosure already happened."""
+        """A greeting that proves she read their site, and says what it means.
+
+        A SELLER DOES NOT RECITE WHAT THEY FOUND. Told to "mention one specific thing you found",
+        a 1.5B model reads the fact back including its label and its list of four items. What a
+        seller does with a signal is say what it might MEAN for the thing they sell, and check.
+        """
         who = self.contact.first_name or "them"
+        spec = self.session.spec
+        sells = spec.knowledge[0].text if spec and spec.knowledge else "what you sell"
+
         if not self.session.prospect.facts:
             # The form gave her a name and a company; research found nothing to add. Better to
             # greet with what she has than to imply she looked them up.
@@ -683,17 +828,56 @@ class Agenda:
                 yield event
             return
 
-        # THE MOST SPECIFIC FACT IS HANDED TO HER, not left to be chosen from a list. Given
-        # nine facts a 1.5B model greets with "Hello! Nice to meet you." — generically, which
-        # wastes the one moment where knowing something specific is worth anything.
-        facts = self.session.prospect.facts
-        hook = next(
-            (f for f in facts if f.startswith(("Technology", "Currently hiring", "Buying signal"))),
-            next((f for f in facts if f.startswith("What they do")), ""),
+        evidence, need = self._diagnose()
+        if need is None:
+            # Read their site and found nothing that bears on what we sell. Say hello and ask
+            # about the problem rather than filling the silence with the rest of the research.
+            async for event in self._speak(
+                f"(Greet {who} by name. Nothing you read about "
+                f"{self.contact.company_guess or 'their company'} relates to {sells}, so do "
+                f"not mention what you read. Ask one question about whether they have that "
+                f"problem today.)"
+            ):
+                yield event
+            return
+
+        self.need = need
+        # AND THE OBJECTIVE LEARNS ABOUT IT NOW. `_retarget` runs at the top of `_speak`, and
+        # the opening no longer speaks through the model — so without this the need would not
+        # reach the system prompt until the next model turn happened to rebuild it. It would
+        # get there eventually; "eventually" is not an invariant.
+        self._retarget(self.step)
+
+        # THE OPENING SENTENCE IS NOT IMPROVISED. Every version that let the model write it went
+        # wrong in a different way and none of them were fixable from the prompt:
+        #
+        #   "mention one specific thing you found"      -> it read four job titles out loud
+        #   "say what it means, then ask exactly this"  -> it diagnosed and never asked
+        #   "...and do NOT ask a question"              -> it asked one anyway, so the tenant's
+        #                                                  question landed second and the buyer
+        #                                                  got two questions in a row
+        #
+        # The third one is the reason this is now fixed text rather than a better prompt. Clips
+        # stream as they are generated, so by the time a reply can be inspected it has already
+        # been heard — there is no post-filter, and a rule that cannot be enforced is a hope.
+        #
+        # This is the first sentence of a sales call. It is the highest-stakes line on it, every
+        # word of it is tenant-written, and it now costs no model time at all. The model still
+        # runs everything from discovery onward, which is where improvising is the point.
+        # The evidence is spoken because it is the proof she actually read the site, and
+        # `Need.narrow` has already cut it down to the noun phrase that carried the signal — so
+        # it drops into a sentence without dragging a list in behind it.
+        greeting = f"Hi {who} — " if self.contact.first_name else "Hi — "
+        looked = f"I had a quick look at {self.contact.domain} before we spoke"
+        # `opener` and `ask` are written lower case because they are fragments a tenant drops
+        # into a sentence, and `evidence` is however the site spelled it. Each one starts a
+        # sentence here, so each one is capitalised here — a full stop followed by "how long
+        # does a new rep" is a thing a reader notices immediately and a caption shows plainly.
+        middle = f"{_opens(evidence)} stood out, and {need.opener}." if evidence else (
+            f"{_opens(need.opener)}."
         )
-        async for event in self._speak(
-            f"(Greet {who} by name, mention this specific thing you found — {hook or 'their site'}"
-            " — and ask what prompted them to look at this.)"
+        async for event in self._say(
+            f"{greeting}{looked}. {middle} {_opens(need.ask)}"
         ):
             yield event
 
@@ -762,15 +946,36 @@ class Agenda:
                 "viewport_ratio": looked.get("viewport_ratio", 1),
             },
         )
-        excerpt = (looked.get("text") or "")[:700]
+        # WHAT IS ON THE SCREEN IS THE TENANT'S SENTENCE. WHY IT MATTERS IS THE MODEL'S.
+        #
+        # Describing a screen share is the one narration job a 1.5B model cannot be trusted
+        # with, and two prompts proved it in opposite directions. Handed 700 characters of the
+        # demo customer's page it described the page: "pricing for a compute capacity service
+        # called Tessera, offered by Rainmaker" — Tessera is the example customer, not the
+        # product — and read that site's "~90s node ready" back as renting GPUs "for up to
+        # ninety seconds". Told instead not to describe the page, it let go of the screen
+        # altogether and described the PROSPECT from the research dossier: "Stripe is a flexible
+        # solutions provider for businesses..." while our own product sat on screen behind it.
+        #
+        # Both failures are the same failure: the sentence that has to be factually right about
+        # a picture was being generated from context rather than stated. `TourStop.shows` is
+        # that sentence, the tenant wrote it, and it is right by construction — so it is said,
+        # not paraphrased. The model then does the part it is good at and cannot get factually
+        # wrong: tying it back to the problem this particular buyer just described.
         ours = self.session.spec.company if self.session.spec else "your company"
         theirs = self.session.prospect.company or self.contact.company_guess or "their company"
+
+        async for event in self._say(f"What you're looking at is {stop.shows}."):
+            yield event
+
+        excerpt = " ".join((looked.get("text") or "").split())[:240]
         async for event in self._speak(
-            f"(You are screen-sharing {ours}'s OWN product with them: {stop.label}. "
-            f"It shows: {stop.shows}. The page reads: {excerpt} "
-            f"This page belongs to {ours}, not to {theirs} — it is what they would be buying. "
-            f"Say what is on the screen and what it would do about the problem they described. "
-            f"Do not read the page out.)"
+            f"(You are screen-sharing {ours}'s own product with {theirs}: {stop.label}. You "
+            f"have just told them what is on the screen, so do NOT describe it again and do NOT "
+            f"describe {theirs}. In ONE sentence, say what it would do about the problem they "
+            f"described. Address them as \"you\" — they are on the call, so \"my client\" or "
+            f"\"the customer\" is the wrong person. "
+            f"For reference only, the page reads: {excerpt})"
         ):
             yield event
 
@@ -992,7 +1197,7 @@ class Agenda:
                     "company": self.session.prospect.company,
                     # WHAT A REP READS BEFORE WALKING IN, not the tape. This used to paste the
                     # last six lines of dialogue verbatim, so the diary showed "Prospect: how
-                    # much does it cost? Liv: Pricing depends on seats and..." — the raw
+                    # much does it cost? Nadia: Pricing depends on seats and..." — the raw
                     # transcript, mid-sentence, as the meeting's title text. The full transcript
                     # is already on the deal; what belongs here is why the meeting exists.
                     "notes": self._booking_note(),
@@ -1113,7 +1318,7 @@ class Agenda:
         wants the reason, not the recording.
         """
         company = self.session.prospect.company or self.contact.company_guess
-        parts = [f"{company} — booked by Liv." if company else "Booked by Liv."]
+        parts = [f"{company} — booked by Nadia." if company else "Booked by Nadia."]
 
         asked = next(
             (line[len("Prospect: ") :] for line in self.transcript_lines if line.startswith("Prospect: ")),
@@ -1137,4 +1342,4 @@ class Agenda:
             return f"{company}: quoted {self.quote.money(self.quote.total)} and sent checkout."
         if outcome == "handed_off":
             return f"{company}: asked for a person mid-call."
-        return f"{company}: spoke to Liv, no meeting booked."
+        return f"{company}: spoke to Nadia, no meeting booked."

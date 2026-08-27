@@ -117,7 +117,7 @@ export interface Engines {
   stt: { name: string; local: boolean };
 }
 
-/** Something Liv put on the stage. The most recent of each kind is kept. */
+/** Something Nadia put on the stage. The most recent of each kind is kept. */
 export interface Panels {
   facts?: { company: string; domain: string; facts: string[]; pages_read?: string[] };
   browser?: {
@@ -835,7 +835,11 @@ export class LiveCall {
       this.at(clip.duration_ms, () => this.mouthOff());
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(clip.text);
+    // READ THE SPOKEN SPELLING, SHOW THE WRITTEN ONE. `speechSynthesis` says "asterisk
+    // asterisk" and "aitch tee tee pee colon" as readily as any other engine, so the server
+    // sends a pronounceable version alongside the caption. `mouthOn` still gets `text`,
+    // because that is what goes on screen.
+    const utterance = new SpeechSynthesisUtterance(clip.spoken || clip.text);
     utterance.rate = 1.05;
     utterance.onstart = () => this.mouthOn(clip.text);
     utterance.onend = () => this.mouthOff();
@@ -927,7 +931,9 @@ interface MouthMessage {
 interface ClipMessage {
   type: "clip";
   index: number;
+  /** What to show. Optional `spoken` is what to read aloud, when the two differ. */
   text: string;
+  spoken?: string;
   duration_ms: number;
   generate_ms: number;
   wav: string;

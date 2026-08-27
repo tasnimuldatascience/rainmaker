@@ -2,7 +2,7 @@
  * The progress rail has to cover every step the agenda can emit.
  *
  * WHY THIS IS A TEST AND NOT A COMMENT. `opening` was missing from the rail, so for the three
- * seconds Liv spends introducing herself `findIndex` returned -1, every pill fell through to
+ * seconds Nadia spends introducing herself `findIndex` returned -1, every pill fell through to
  * "idle", and the rail read as broken at exactly the moment a first-time viewer is looking at
  * it. Nothing failed; it just went blank. A list that has to stay in step with a Python enum is
  * the kind of thing that drifts silently on the next step someone adds.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download the lip-sync model, so Liv's mouth moves.
+"""Download the lip-sync model, so Nadia's mouth moves.
 
     python scripts/fetch-lipsync.py
 

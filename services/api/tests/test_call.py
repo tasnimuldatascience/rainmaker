@@ -242,10 +242,10 @@ class TestWhatTheAgentMayClaim:
 
     def test_what_the_agent_may_claim_comes_from_its_spec(self):
         """It used to be a constant in `session.py`, which meant shipping a second agent was a
-        release. It is a row now, and Liv is the first row."""
-        from rainmaker.agents.store import liv_spec
+        release. It is a row now, and Nadia is the first row."""
+        from rainmaker.agents.store import nadia_spec
 
-        spec = liv_spec()
+        spec = nadia_spec()
         prompt = build_system_prompt(AgentProfile.of(spec), Prospect(), spec)
         assert "at any hour" in prompt
         assert "ONLY claims you may make" in prompt

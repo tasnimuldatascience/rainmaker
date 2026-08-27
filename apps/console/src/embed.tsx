@@ -109,7 +109,7 @@ function Widget() {
           speaking={state.speaking}
           listening={live && !state.speaking}
           fill
-          src={state.agent?.portrait ?? door?.portrait ?? "/agent/liv.jpg"}
+          src={state.agent?.portrait ?? door?.portrait ?? "/agent/nadia.jpg"}
         />
       </div>
       {state.caption && <div className="w-caption">{state.caption}</div>}

@@ -130,6 +130,8 @@ class Clip:
     and the moment the mouth stops are both derived from the thing actually being played.
     """
 
+    #: What was said, as it was written. This is the caption, and it keeps its "$", its
+    #: "stripe.com" and its capital letters.
     text: str
     wav: bytes
     sample_rate: int = 24_000
@@ -138,6 +140,14 @@ class Clip:
     index: int = 0
     #: True when there is no local voice and the client must speak this text itself.
     browser_voice: bool = False
+    #: The same words, spelled for a voice rather than for an eye — see `calls/speech.say`.
+    #: Empty means "no different from `text`"; read it through `to_say` rather than directly.
+    spoken: str = ""
+
+    @property
+    def to_say(self) -> str:
+        """What a synthesiser should be given. Never the caption, when the two differ."""
+        return self.spoken or self.text
 
 
 # ───────────────────────────────────────────────────────────── provider interfaces

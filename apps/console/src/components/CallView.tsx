@@ -79,11 +79,15 @@ export function CallView({ store }: { store: LocalStore }) {
   const [door, setDoor] = useState<FrontDoor | null>(null);
   // The telemetry drawer. Closed by default: on a call the thing worth looking at is the call.
   const [showSide, setShowSide] = useState(false);
+  // THE PHOTOGRAPH IS WHAT SHE LOOKS LIKE, so it is what a first-time viewer gets. The drawn
+  // rig opened the call for a while and it was the wrong way round: it is the fallback, it is
+  // the cheaper picture, and a reviewer who never touches the switch should not be shown the
+  // weaker of the two things this repository built. The choice, once made, is still theirs.
   const [face, setFace] = useState<FaceKind>(() => {
     try {
-      return localStorage.getItem("rainmaker.face") === "photo" ? "photo" : "drawn";
+      return localStorage.getItem("rainmaker.face") === "drawn" ? "drawn" : "photo";
     } catch {
-      return "drawn";
+      return "photo";
     }
   });
   useEffect(() => {
@@ -524,7 +528,7 @@ function Intake({
         <i />
         Live demo
       </span>
-      {/* WHOSE AGENT THIS IS, FROM THE AGENT. This said "Meet Liv" whichever agent was
+      {/* WHOSE AGENT THIS IS, FROM THE AGENT. This said "Meet Nadia" whichever agent was
           answering, so the console's own heading contradicted the name on the tile beside it the
           moment a second tenant existed. */}
       <h2>

@@ -113,9 +113,25 @@ await shot("call", async (p) => {
   await greeted(p);
 
   // Then ask to see it, so the shot shows the thing that makes this a demo rather than a chat:
-  // OUR product, driven live in a real browser, with Liv talking over it.
+  // OUR product, driven live in a real browser, with Nadia talking over it.
   await say(p, "show me what it looks like");
   await p.waitForSelector(".screen-frame", { timeout: 120000 });
+
+  // LET THE PAGE FINISH SCROLLING FIRST. The scroll is a 2.4s eased transform on a picture of a
+  // whole page, and the shutter used to fire somewhere in the middle of it — which produced a
+  // README image with a table row torn through the site's sticky header. It looks like a
+  // rendering bug in the product rather than a screenshot taken too early, which is the worst
+  // way for a picture on a front page to be wrong.
+  await p
+    .waitForFunction(
+      () => {
+        const el = document.querySelector(".screen-frame");
+        return el && !el.hasAttribute("data-scrolling");
+      },
+      null,
+      { timeout: 30000 },
+    )
+    .catch(() => console.warn("the frame never left its scrolling state"));
 
   // Wait for a frame where she is AUDIBLY speaking: `--loud` is the RMS of the audio playing at
   // that instant, so a high value means the shutter caught her mid-word rather than in the gap

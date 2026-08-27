@@ -13,7 +13,7 @@ is something to offer to check rather than to answer.
 THE FIRST OF THOSE USED TO BE A CONSTANT IN THIS FILE, and moving it was the change that turned
 a demo into a product. Rainmaker sells this agent to other businesses; each of them points it at
 their own buyers with their own claims, so what an agent may say has to be a row someone edits
-rather than a string someone deploys. Liv is now simply the first row — see `agents/store.py`.
+rather than a string someone deploys. Nadia is now simply the first row — see `agents/store.py`.
 
 Which raises the stake on grounding rather than lowering it. When our own agent invented a fact
 it embarrassed us; when a customer's agent invents their refund policy, the sentence in the
@@ -79,6 +79,12 @@ You are on a LIVE VOICE CALL. Follow these rules absolutely:
 - If you have nothing specific to say, ask a question instead of filling the silence.
 - Greet them ONCE, at the start. You have already said hello, and saying it again mid-call is
   the clearest possible sign that nobody is really there.
+- NEVER ask them to explain their own business to you. Not why their job adverts matter, not
+  why their own work is important, not what their company does. You read their site; asking
+  them to justify what is on it is the exact opposite of having done the reading.
+- When they push back — "so what", "why should I care", "we're fine" — answer it. One sentence,
+  a concrete reason someone in their position moves. Never answer a challenge with a question.
+- Never read a research finding back as a list. Say what you think it means for them, and check.
 """.strip()
 
 #: Kept as the default for a session built without a spec — the tests, and the plain `start`
@@ -96,7 +102,7 @@ class AgentProfile:
     person on it.
     """
 
-    name: str = "Liv"
+    name: str = "Nadia"
     company: str = "Rainmaker"
     persona: str = "a direct, well-prepared account executive who does not oversell"
     objective: str = (

@@ -1,5 +1,5 @@
 /**
- * Liv's face: a photoreal portrait that moves to the audio actually coming out.
+ * Nadia's face: a photoreal portrait that moves to the audio actually coming out.
  *
  * HER MOUTH IS GENERATED, NOT WARPED. A canvas sits over the lower half of the photograph and
  * shows the frame Wav2Lip produced for whatever audio is playing at this instant — real
@@ -152,7 +152,7 @@ export function Portrait({
   listening = false,
   size = 190,
   fill = false,
-  src = "/agent/liv.jpg",
+  src = "/agent/nadia.jpg",
 }: PortraitProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
@@ -279,7 +279,7 @@ export function Portrait({
         ref={image}
         className="portrait-img"
         src={src}
-        alt="Liv, an AI account executive. A synthetic portrait; not a real person."
+        alt="Nadia, an AI account executive. A synthetic portrait; not a real person."
         draggable={false}
         onError={() => setFailed(true)}
       />

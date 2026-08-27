@@ -44,7 +44,7 @@ log = logging.getLogger("rainmaker.calls.avatar")
 #: The portrait the console renders. Served as a static asset rather than streamed, because it
 #: is one 21KB image that never changes during a call — pushing it down the socket every turn
 #: would be a megabyte an hour to say the same thing.
-PORTRAIT_PATH = os.environ.get("RAINMAKER_PORTRAIT", "/agent/liv.jpg")
+PORTRAIT_PATH = os.environ.get("RAINMAKER_PORTRAIT", "/agent/nadia.jpg")
 
 #: Set to turn on a hosted talking head. Named per provider so a deployment can hold several.
 HOSTED_KEY_VARS = ("RAINMAKER_AVATAR_KEY", "SIMLI_API_KEY", "TAVUS_API_KEY", "HEYGEN_API_KEY")

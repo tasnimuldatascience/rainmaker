@@ -17,7 +17,8 @@ from typing import Any
 
 import pytest
 
-from rainmaker.agents.store import liv_spec
+from rainmaker.agents.spec import Fact
+from rainmaker.agents.store import nadia_spec
 from rainmaker.calls.agenda import Agenda, Panel, Phase, Step, detect_intent, read_marker
 from rainmaker.calls.intake import FREE_PROVIDERS, IntakeError, parse_contact, parse_intake
 from rainmaker.calls.naming import clean_company_name
@@ -193,7 +194,7 @@ class TestWhatMovesTheCall:
         from rainmaker.agents.spec import TourStop
 
         spec = replace(
-            liv_spec(),
+            nadia_spec(),
             tour=(
                 TourStop(
                     url="https://demo.example/#capacity",
@@ -322,7 +323,7 @@ def build(email: str = "dana.whitfield@corvus.example", spec: Any = None, **over
     call uses one — but it is not what a configured agent looks like, and the tests about what
     she may say and charge need the configured shape.
     """
-    spec = liv_spec() if spec is None else spec
+    spec = nadia_spec() if spec is None else spec
     stt = ClientSpeechToText()
     session = CallSession(
         CallPipeline(stt=stt, llm=ScriptedLanguageModel(ms_per_word=0), tts=SilentTextToSpeech()),
@@ -418,7 +419,7 @@ class TestShowingThemTheProduct:
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
 
-        stops = {stop.url for stop in liv_spec().tour}
+        stops = {stop.url for stop in nadia_spec().tour}
         assert set(self.tour_pages(tools)) <= stops
 
     async def test_the_model_is_told_what_is_on_the_screen(self):
@@ -552,7 +553,7 @@ class TestTheNumberIsComputedNotGenerated:
 
         from rainmaker.agents.spec import Tier
 
-        unpriced = replace(liv_spec(), pricing=(Tier("Enterprise", "quoted", "talk to us"),))
+        unpriced = replace(nadia_spec(), pricing=(Tier("Enterprise", "quoted", "talk to us"),))
         agenda, _ = build(spec=unpriced)
         await collect(agenda.begin())
         events = await collect(agenda.respond("how much does it cost?"))
@@ -631,7 +632,7 @@ class TestClosingTheDeal:
         assert shown
         rivals = {r["name"]: r for r in shown[0].data["rivals"]}
         assert "a chat widget" in rivals
-        configured = {c.name: c for c in liv_spec().competitors}["a chat widget"]
+        configured = {c.name: c for c in nadia_spec().competitors}["a chat widget"]
         assert rivals["a chat widget"]["positioning"] == configured.positioning
 
 
@@ -757,12 +758,63 @@ class TestSheSaysWhatSheIsBeforeAnythingElse:
         said = spoken(await collect(agenda.begin()))
         assert said.lower().count("not a human") == 1
 
-    async def test_the_greeting_is_handed_a_specific_fact_to_use(self):
-        """Given nine facts a small model greets with "Hello! Nice to meet you." — generically,
-        wasting the one moment where knowing something specific is worth anything."""
-        agenda, _ = build()
+    async def test_the_greeting_is_handed_a_diagnosis_rather_than_a_fact(self):
+        """RECITING RESEARCH IS NOT SELLING. Handed "mention one specific thing you found", a
+        1.5B model reads the fact back — label, list and all. Observed on a real call: "I
+        noticed you're currently hiring four positions: Production Associates, Product Manager,
+        Research and Development Engineer, and Sales and Marketing Specialist", from an agent
+        that rents GPUs.
+
+        The prompt now carries what the finding MEANS for what this agent sells, and forbids
+        reading it back."""
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import Need
+
+        spec = replace(
+            nadia_spec(),
+            needs=(
+                Need(
+                    signals=("ClickHouse", "analytics", "logistics"),
+                    means="they run their own analytics stack and answer inbound themselves",
+                    opener="it looks like you answer inbound yourselves",
+                    ask="who picks up an inbound demo request today?",
+                ),
+            ),
+        )
+        agenda, _ = build(spec=spec)
+        before = len(agenda.session.pipeline.llm.calls)
+        said = spoken(await collect(agenda.begin()))
+
+        # THE OPENING IS THE TENANT'S SENTENCE, not the model's. Every earlier version of this
+        # test asserted on a prompt; there is no prompt now, which is the point.
+        assert "it looks like you answer inbound yourselves" in said.lower(), said
+        assert "who picks up an inbound demo request today?" in said.lower(), said
+        assert not [p for p in agenda.session.pipeline.llm.calls[before:] if "Greet" in p]
+
+    async def test_research_that_says_nothing_about_the_product_is_not_read_out(self):
+        """An opening that recites irrelevant research is worse than one admitting it has none:
+        it tells the buyer the reading was mechanical. Four job titles from a careers page, on a
+        call about GPUs, is exactly that."""
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import Need
+
+        spec = replace(
+            nadia_spec(),
+            needs=(
+                Need(signals=("kubernetes",), means="they run their own clusters",
+                     opener="it looks like you run your own clusters",
+                     ask="how much of that is yours to keep running?"),
+            ),
+        )
+        agenda, _ = build(spec=spec)
         await collect(agenda.begin())
-        assert any("ClickHouse" in prompt for prompt in agenda.session.pipeline.llm.calls)
+
+        opening = [p for p in agenda.session.pipeline.llm.calls if "Greet" in p]
+        assert opening
+        assert "do not mention what you read" in opening[0]
+        assert "ClickHouse" not in opening[0]
 
 
 class TestWhoseWebsiteItIs:
@@ -773,15 +825,41 @@ class TestWhoseWebsiteItIs:
     were theirs. So the prompt names both companies and says which one owns the page.
     """
 
-    async def test_the_prompt_says_the_page_on_screen_is_ours(self):
+    async def test_what_is_on_the_screen_is_said_in_the_tenants_own_words(self):
+        """THE ONE NARRATION JOB THE MODEL DOES NOT GET. Handed the page text it described the
+        page and got it wrong — "a compute capacity service called Tessera, offered by
+        Rainmaker", when Tessera is the example customer and not the product. Told not to
+        describe the page it described the PROSPECT instead, from the research dossier, while
+        our own product sat on screen behind it.
+
+        `TourStop.shows` is right by construction, so it is spoken rather than paraphrased."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        said = spoken(await collect(agenda.respond("show me what it looks like")))
+
+        stop = nadia_spec().tour[0]
+        assert f"What you're looking at is {stop.shows}." in said, said
+
+    async def test_the_model_is_told_not_to_describe_the_screen_or_the_prospect(self):
         agenda, _ = build()
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
 
-        narration = [p for p in agenda.session.pipeline.llm.calls if "screen-sharing" in p]
-        assert narration, "the narration prompt did not survive"
-        assert "Rainmaker's OWN product" in narration[0]
-        assert "belongs to Rainmaker, not to Corvus Data" in narration[0]
+        prompt = [p for p in agenda.session.pipeline.llm.calls if "screen-sharing" in p][0]
+        assert "Rainmaker's own product with Corvus Data" in prompt, prompt
+        assert "do NOT describe it again" in prompt, prompt
+        assert "do NOT describe Corvus Data" in prompt, prompt
+
+    async def test_the_page_excerpt_is_reference_and_cannot_become_the_subject(self):
+        """At 700 characters the excerpt stopped being context and became the subject: given
+        most of a page of somebody else's GPU pricing, the model described GPU pricing."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("show me what it looks like"))
+
+        prompt = [p for p in agenda.session.pipeline.llm.calls if "screen-sharing" in p][0]
+        reference = prompt.split("the page reads:", 1)[1]
+        assert len(reference.strip().rstrip(")")) <= 240, len(reference)
 
 
 class TestTheAudienceNeverHearsTheStageDirections:
@@ -884,7 +962,7 @@ class TestSheScrollsToThePoint:
         await collect(agenda.respond("show me what it looks like"))
 
         opened = self.tour_calls(tools)
-        wanted = {stop.url: stop.scroll_to for stop in liv_spec().tour}
+        wanted = {stop.url: stop.scroll_to for stop in nadia_spec().tour}
         assert opened and opened[0]["scroll_to"] == wanted[opened[0]["url"]]
 
     async def test_nothing_to_aim_at_is_not_an_error(self):
@@ -895,10 +973,186 @@ class TestSheScrollsToThePoint:
         from rainmaker.agents.spec import TourStop
 
         spec = replace(
-            liv_spec(),
+            nadia_spec(),
             tour=(TourStop(url="https://demo.example/", label="the product", shows="the app"),),
         )
         agenda, tools = build(spec=spec)
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
         assert self.tour_calls(tools)[0]["scroll_to"] == ""
+
+
+class TestItSellsOnNeedRatherThanRecitingResearch:
+    """FROM A REAL CALL, VERBATIM. The agent rents GPUs; the prospect runs a manufacturing
+    company:
+
+        agent     Hello Tasnimul! I noticed you're currently hiring four positions: Production
+                  Associates, Product Manager, Research & Development Engineer, and Sales &
+                  Marketing Specialist.
+        prospect  so what
+        agent     That looks interesting. Could you tell me why you think these roles are
+                  important?
+        prospect  Sure! ...
+        agent     These roles seem like key areas where innovation happens at your company.
+
+    Four job titles read back to the person who wrote them, then the buyer asked to justify
+    their own recruitment, then filler. Nothing in there is about GPUs, and the agent never
+    once said what it sells.
+
+    Three separate causes, all ours: the greeting recited a finding instead of interpreting it,
+    nothing connected a finding to a reason to buy, and a challenge fell through to an ordinary
+    turn where a small model mirrors.
+    """
+
+    @staticmethod
+    def gpu_spec():
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import Need
+
+        return replace(
+            nadia_spec(),
+            company="Tessera Compute",
+            knowledge=(
+                Fact("Tessera rents H100 GPUs by the hour, with no minimum term.",
+                     source="positioning"),
+                Fact("Most teams arrive because their cloud quota has been pending for weeks.",
+                     source="the problem", topic="why"),
+            ),
+            needs=(
+                Need(
+                    signals=("research and development", "engineer", "hiring"),
+                    means="they are building something new that will run into compute",
+                    opener="it looks like you are building something new",
+                    ask="is any of that work model training?",
+                ),
+            ),
+        )
+
+    @staticmethod
+    def hiring_research() -> dict[str, Any]:
+        """The careers page that produced the worst opening this agent ever gave.
+
+        Four job titles, read back verbatim to the person who wrote them, on a call about
+        renting GPUs. Kept as a fixture because every test in this class is about what should
+        happen INSTEAD.
+        """
+        return {
+            "research.research_company": {
+                "name": {"value": "Halden Industries"},
+                "hiring": [
+                    {"title": "Production Associate"}, {"title": "Product Manager"},
+                    {"title": "Research and Development Engineer"},
+                    {"title": "Sales and Marketing Specialist"},
+                ],
+                "pages_fetched": [],
+            }
+        }
+
+    async def test_the_greeting_says_what_the_finding_means_and_never_lists_it(self):
+        agenda, _ = build(spec=self.gpu_spec(), **self.hiring_research())
+        said = spoken(await collect(agenda.begin()))
+
+        # THE LIST IS NEVER SPOKEN. Only the role that carried the signal is — the other three
+        # job titles are the ones the agent read out loud, verbatim, on the real call.
+        assert "Research and Development Engineer" in said, said
+        for unrelated in ("Production Associate", "Product Manager", "Sales and Marketing"):
+            assert unrelated not in said, f"{unrelated!r} was read out anyway"
+
+        assert "it looks like you are building something new" in said.lower(), said
+        assert "is any of that work model training?" in said.lower(), said
+
+    async def test_a_field_with_a_value_is_not_quoted_as_a_noun_phrase(self):
+        """"How they charge: sales assisted" is a field, not an enumeration, and reading it into
+        the quote slot produced "sales assisted stood out" — grammatical, and not English
+        anybody speaks. The need still selects; it just does not get quoted."""
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import Need
+
+        spec = replace(
+            self.gpu_spec(),
+            needs=(
+                Need(
+                    signals=("sales assisted",),
+                    means="they sell through people",
+                    opener="it looks like you sell through a team",
+                    ask="how big is that team today?",
+                ),
+            ),
+        )
+        agenda, _ = build(
+            spec=spec,
+            **{"research.research_company": {"pricing_model": {"value": "sales assisted"},
+                                             "pages_fetched": []}},
+        )
+        said = spoken(await collect(agenda.begin()))
+        assert "stood out" not in said, said
+        assert "it looks like you sell through a team" in said.lower(), said
+        assert "how big is that team today?" in said.lower(), said
+
+    async def test_the_tenants_question_is_spoken_word_for_word(self):
+        """A wrong question is worse than no question, which is why a tenant writes it. Routed
+        through a 1.5B model it came back paraphrased on a good turn and missing on a bad one."""
+        agenda, _ = build(spec=self.gpu_spec(), **self.hiring_research())
+        said = spoken(await collect(agenda.begin()))
+        assert "is any of that work model training?" in said.lower(), said
+
+    async def test_every_sentence_in_the_opening_starts_with_a_capital(self):
+        """`opener` and `ask` are written lower case because a tenant writes them as fragments.
+        Each one starts a sentence when it is spoken, and a full stop followed by "how long does
+        a new rep" is something a reader sees before they have finished the line."""
+        agenda, _ = build(spec=self.gpu_spec(), **self.hiring_research())
+        said = spoken(await collect(agenda.begin()))
+        opening = said[said.index("Hi Dana"):]
+        for sentence in (s.strip() for s in opening.split(". ") if s.strip()):
+            assert sentence[0].isupper(), f"{sentence!r} in {opening!r}"
+
+    async def test_an_acronym_in_the_evidence_is_not_flattened(self):
+        """`str.capitalize` lower-cases everything after the first letter, which turned
+        "Research and Development Engineer" into "Research and development engineer"."""
+        agenda, _ = build(spec=self.gpu_spec(), **self.hiring_research())
+        said = spoken(await collect(agenda.begin()))
+        assert "Research and Development Engineer" in said, said
+
+    async def test_a_challenge_is_answered_with_a_reason_not_a_question(self):
+        """"So what" is the commonest first objection. It carries no intent, so it used to fall
+        through to a discovery turn — and the model asked the buyer to justify their own job
+        adverts."""
+        agenda, _ = build(spec=self.gpu_spec())
+        await collect(agenda.begin())
+        before = len(agenda.session.pipeline.llm.calls)
+
+        await collect(agenda.respond("so what"))
+        asked = " ".join(agenda.session.pipeline.llm.calls[before:])
+
+        assert "pushed back" in asked
+        assert "Do NOT ask them a question about their own business" in asked
+        assert "rents H100 GPUs" in asked, "it was not told what it sells"
+        # The tenant's own "why they move" line is handed over as the reason.
+        assert "quota has been pending" in asked
+
+    @pytest.mark.parametrize(
+        "said", ["so what", "ok", "why should I care", "not interested", "who cares"]
+    )
+    async def test_the_shapes_a_pushback_takes(self, said: str):
+        agenda, _ = build(spec=self.gpu_spec())
+        await collect(agenda.begin())
+        before = len(agenda.session.pipeline.llm.calls)
+        await collect(agenda.respond(said))
+        assert "pushed back" in " ".join(agenda.session.pipeline.llm.calls[before:]), said
+
+    async def test_a_real_question_is_not_treated_as_a_pushback(self):
+        agenda, _ = build(spec=self.gpu_spec())
+        await collect(agenda.begin())
+        before = len(agenda.session.pipeline.llm.calls)
+        await collect(agenda.respond("how much does it cost for 40 people?"))
+        assert "pushed back" not in " ".join(agenda.session.pipeline.llm.calls[before:])
+
+    async def test_the_need_is_carried_into_every_later_step(self):
+        """Working out what they need in the opening and then never mentioning it again is how
+        a call drifts back into small talk by the second question."""
+        agenda, _ = build(spec=self.gpu_spec(), **self.hiring_research())
+        await collect(agenda.begin())
+        assert agenda.need is not None
+        assert "will run into compute" in agenda.session.profile.objective

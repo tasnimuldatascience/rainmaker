@@ -20,12 +20,16 @@ import pytest
 from rainmaker.agents.spec import (
     MAX_KNOWLEDGE_CHARS,
     AgentSpec,
+    DEFAULT_VOICE,
+    VOICE_CATALOGUE,
+    VOICES,
     Fact,
     Guardrails,
+    Need,
     SpecError,
     Tier,
 )
-from rainmaker.agents.store import LIV_AGENT, LIV_TENANT, AgentStore, liv_spec, seed
+from rainmaker.agents.store import NADIA_AGENT, NADIA_TENANT, AgentStore, nadia_spec, seed
 
 
 @pytest.fixture
@@ -265,68 +269,68 @@ class TestTenantIsolation:
 
 
 # ───────────────────────────────────────────────────────────── tenant zero
-class TestLivIsJustTheFirstRow:
+class TestNadiaIsJustTheFirstRow:
     def test_our_own_agent_is_a_valid_configuration(self):
-        """THE POINT OF THE WHOLE MODULE. If Liv were a special case she would drift, and we
+        """THE POINT OF THE WHOLE MODULE. If Nadia were a special case she would drift, and we
         would be demonstrating something we do not sell. She goes through the same validation a
         customer's agent does."""
-        liv_spec().validate()
+        nadia_spec().validate()
 
     def test_seeding_publishes_her(self, store: AgentStore):
         seeded = seed(store)
         assert seeded.published
-        assert store.live(LIV_TENANT, LIV_AGENT) is not None
+        assert store.live(NADIA_TENANT, NADIA_AGENT) is not None
 
     def test_seeding_twice_does_not_make_a_second_version(self, store: AgentStore):
         seed(store)
         seed(store)
-        assert store.versions(LIV_TENANT, LIV_AGENT) == [1]
+        assert store.versions(NADIA_TENANT, NADIA_AGENT) == [1]
 
     def test_seeding_after_the_code_changed_publishes_the_change(self, store: AgentStore):
-        """IDEMPOTENT IS NOT INERT. Liv is defined in code, so a new tour stop or a priced tier
+        """IDEMPOTENT IS NOT INERT. Nadia is defined in code, so a new tour stop or a priced tier
         is a code change — and a seed that returned early whenever anything was live served
         whatever had been seeded first. The tour was empty and the comparison step fell through
         to the model, silently, on a database nobody thought to look at."""
         from dataclasses import replace
 
-        from rainmaker.agents.store import liv_spec
+        from rainmaker.agents.store import nadia_spec
 
-        stale = store.save(replace(liv_spec(), tour=(), competitors=()))
+        stale = store.save(replace(nadia_spec(), tour=(), competitors=()))
         store.publish(stale.tenant, stale.agent_id, stale.version)
 
         seeded = seed(store)
         assert seeded.tour and seeded.competitors
-        assert store.versions(LIV_TENANT, LIV_AGENT) == [1, 2]
-        assert store.live(LIV_TENANT, LIV_AGENT).version == 2
+        assert store.versions(NADIA_TENANT, NADIA_AGENT) == [1, 2]
+        assert store.live(NADIA_TENANT, NADIA_AGENT).version == 2
 
     def test_a_key_survives_the_agent_being_upgraded(self, store: AgentStore):
         """The key is in a script tag on somebody's website. Reissuing it on every deploy would
         take every embedded agent offline."""
         from dataclasses import replace
 
-        from rainmaker.agents.store import liv_spec
+        from rainmaker.agents.store import nadia_spec
 
-        stale = store.save(replace(liv_spec(), tour=()))
+        stale = store.save(replace(nadia_spec(), tour=()))
         store.publish(stale.tenant, stale.agent_id, stale.version)
-        before = store.live(LIV_TENANT, LIV_AGENT).public_key
+        before = store.live(NADIA_TENANT, NADIA_AGENT).public_key
         assert seed(store).public_key == before
 
     def test_she_knows_about_the_things_the_readme_claims(self):
         """WHAT SHE SELLS IS WHAT THE PRODUCT DOES, not how it is built. An earlier version led
         with "the console is offline-first", which is a true sentence about a CRDT and not a
         reason anybody buys anything."""
-        text = liv_spec().knowledge_text().lower()
+        text = nadia_spec().knowledge_text().lower()
         for claim in ("work email", "mcp", "ai before anything else", "at any hour"):
-            assert claim in text, f"Liv cannot talk about {claim!r}"
+            assert claim in text, f"Nadia cannot talk about {claim!r}"
 
     def test_she_does_not_pitch_the_architecture(self):
-        text = liv_spec().knowledge_text().lower()
+        text = nadia_spec().knowledge_text().lower()
         assert "offline-first" not in text
         assert "crdt" not in text
 
     def test_she_can_quote_and_take_payment(self):
         """The funnel closes: a buyer ready at eleven at night should be able to finish."""
-        spec = liv_spec()
+        spec = nadia_spec()
         assert any(tier.unit_amount > 0 for tier in spec.pricing), "nothing is quotable"
         assert "payments" in spec.tools
         assert spec.tour and spec.competitors
@@ -377,7 +381,7 @@ class TestLivIsJustTheFirstRow:
         module = importlib.util.module_from_spec(spec_file)
         spec_file.loader.exec_module(module)
 
-        theirs, ours = module.tessera(), liv_spec()
+        theirs, ours = module.tessera(), nadia_spec()
         theirs.validate()
 
         assert theirs.tenant != ours.tenant
@@ -390,20 +394,20 @@ class TestLivIsJustTheFirstRow:
     def test_her_prices_are_configured_rather_than_compiled(self):
         """They were a module-level constant in `agenda.py`, which meant a second tenant's
         pricing was a code change."""
-        assert [t.name for t in liv_spec().pricing] == ["Team", "Business", "Enterprise"]
+        assert [t.name for t in nadia_spec().pricing] == ["Team", "Business", "Enterprise"]
 
     def test_she_is_granted_the_tools_her_call_actually_uses(self):
-        granted = liv_spec().tools
+        granted = nadia_spec().tools
         for server in ("calendar", "crm", "research", "email", "payments"):
             assert server in granted
 
 
 class TestRoundTripping:
     def test_a_spec_survives_being_stored_and_read_back(self, store: AgentStore):
-        original = liv_spec()
+        original = nadia_spec()
         store.save(original)
-        store.publish(LIV_TENANT, LIV_AGENT, 1)
-        back = store.live(LIV_TENANT, LIV_AGENT)
+        store.publish(NADIA_TENANT, NADIA_AGENT, 1)
+        back = store.live(NADIA_TENANT, NADIA_AGENT)
 
         assert back.name == original.name
         assert back.knowledge_text() == original.knowledge_text()
@@ -519,3 +523,89 @@ class TestEverythingSpokenIsSayable:
         assert money_words(100, "gbp") == "one pound"
         assert money_words(1_000_00, "usd") == "one thousand dollars"
         assert money_words(100_000_00, "usd") == "one hundred thousand dollars"
+
+
+class TestANeedIsNarrowedBeforeItIsSpoken:
+    """A research fact is a list. A thing a person noticed is not.
+
+    The agent's worst observed opening read four job titles off a careers page back to the
+    person who wrote them, on a call about renting GPUs. Telling a 1.5B model "do not list it"
+    while showing it the list does not work, so the list stops here.
+    """
+
+    @staticmethod
+    def hiring() -> Need:
+        return Need(
+            signals=("research and development", "engineer"),
+            means="they are building something new that will run into compute",
+            opener="it looks like you are building something new",
+            ask="is any of that work model training?",
+        )
+
+    def test_only_the_role_that_carried_the_signal_survives(self):
+        fact = (
+            "Currently hiring (4 open roles): Production Associate, Product Manager, "
+            "Research and Development Engineer, Sales and Marketing Specialist"
+        )
+        assert self.hiring().narrow(fact) == "Research and Development Engineer"
+
+    def test_two_matches_are_joined_rather_than_listed(self):
+        need = Need(signals=("aws", "azure"), means="they run in the cloud",
+                    opener="it looks like you run in the cloud", ask="which region?")
+        fact = "Technology on their site: express, rails, aws, azure, snowflake, react, java"
+        assert need.narrow(fact) == "aws and azure"
+
+    def test_a_third_match_is_dropped_because_three_is_a_list_again(self):
+        need = Need(signals=("aws", "azure", "gcp"), means="cloud",
+                    opener="you run in the cloud", ask="which?")
+        narrowed = need.narrow("Technology on their site: aws, azure, gcp, react")
+        assert narrowed == "aws and azure"
+        assert "gcp" not in narrowed
+
+    def test_a_fact_that_is_not_a_list_keeps_its_body_and_loses_its_label(self):
+        need = Need(signals=("logistics",), means="they move freight",
+                    opener="you move freight", ask="how many lanes?")
+        assert need.narrow("What they do: logistics software") == "logistics software"
+
+    def test_a_fact_with_no_label_is_returned_as_it_stands(self):
+        need = Need(signals=("logistics",), means="they move freight",
+                    opener="you move freight", ask="how many lanes?")
+        assert need.narrow("logistics software") == "logistics software"
+
+    def test_it_does_not_raise_when_a_tenant_writes_signals_that_match_nothing(self):
+        """`Need` is tenant data. `narrow` is never called on a non-matching fact by the code
+        that uses it, but it must not explode if a tenant arranges for it to be."""
+        need = Need(signals=("kubernetes",), means="clusters",
+                    opener="you run your own clusters", ask="how many?")
+        assert need.narrow("Technology on their site: express, rails") == "express and rails"
+
+
+class TestTheVoiceTableIsOneTable:
+    """A voice a tenant may name and a voice the synthesiser can produce are the same list.
+
+    They were two lists in two modules and they drifted: `female-british` and `male-british`
+    existed in the engine and were rejected at publish time, and `male-us` validated while being
+    an undocumented alias. A tenant meets that divergence in front of a customer.
+    """
+
+    def test_the_engine_reads_the_catalogue_rather_than_its_own_copy(self):
+        from rainmaker.calls.providers import KokoroTextToSpeech
+
+        assert KokoroTextToSpeech.VOICES is VOICE_CATALOGUE
+
+    def test_every_voice_a_tenant_may_name_can_actually_be_synthesised(self):
+        from rainmaker.calls.providers import KokoroTextToSpeech
+
+        for name in VOICES:
+            assert name in KokoroTextToSpeech.VOICES, name
+
+    def test_the_default_is_a_voice_that_exists(self):
+        assert DEFAULT_VOICE in VOICES
+
+    def test_a_voice_nobody_offers_is_refused_at_publish_time(self):
+        """`bf_isabella` is a real Kokoro voice and a bad one — grade C, and it clips. Naming a
+        raw engine voice must fail here rather than reach a customer."""
+        from dataclasses import replace
+
+        with pytest.raises(SpecError, match="unknown voice"):
+            replace(nadia_spec(), voice="bf_isabella").validate()

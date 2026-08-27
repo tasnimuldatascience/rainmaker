@@ -45,7 +45,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .agents.store import LIV_AGENT, LIV_TENANT, AgentStore, seed
+from .agents.store import NADIA_AGENT, NADIA_TENANT, AgentStore, seed
 from .calls.admission import Admission, visitor_id
 from .calls.agenda import Agenda, Panel, Phase
 from .calls.avatar import build_avatar
@@ -337,7 +337,7 @@ def create_app() -> FastAPI:
         """One call per socket.
 
         THE CALL STARTS WITH A FORM, not a button. `intake` is the first message and carries a
-        name, a work address and a company: the domain is everything Liv knows before she
+        name, a work address and a company: the domain is everything Nadia knows before she
         speaks, so research runs on it and the prospect watches that happen. `start` remains for
         a call with no intake — the plain conversation, no research, no agenda.
 
@@ -360,7 +360,7 @@ def create_app() -> FastAPI:
         # typo all resolve to nothing on purpose, because telling a stranger which of the three
         # it was is an enumeration oracle.
         spec = state.agents.resolve(ws.query_params.get("key", "")) or state.agents.live(
-            LIV_TENANT, LIV_AGENT
+            NADIA_TENANT, NADIA_AGENT
         )
         if spec is None:
             await ws.send_json({"type": "no_agent", "detail": "no published agent for that key"})
@@ -427,7 +427,7 @@ def create_app() -> FastAPI:
             try:
                 # THE AGENT'S OWN FACE. A dental practice's receptionist must not be lip-synced
                 # onto our account executive's portrait, which is what happened the first time
-                # this ran on a second tenant: Alex answered in Liv's face.
+                # this ran on a second tenant: Alex answered in Nadia's face.
                 frames = await asyncio.to_thread(
                     state.lipsync.frames_for_wav, wav, portrait_file(spec.portrait)
                 )
@@ -454,6 +454,10 @@ def create_app() -> FastAPI:
                             "type": "clip",
                             "index": event.clip.index,
                             "text": event.clip.text,
+                            # What to READ ALOUD, when that differs from what to show. Only the
+                            # browser-voice path uses it; with a local voice the audio is
+                            # already synthesised from it.
+                            "spoken": event.clip.to_say,
                             "duration_ms": round(event.clip.duration_ms, 1),
                             "generate_ms": round(event.clip.generate_ms, 1),
                             # Empty when there is no local voice; the client then speaks the
@@ -493,7 +497,7 @@ def create_app() -> FastAPI:
                 kind = message.get("type")
 
                 if kind in ("intake", "email"):
-                    # THE FRONT DOOR. Everything Liv knows before she speaks comes from these
+                    # THE FRONT DOOR. Everything Nadia knows before she speaks comes from these
                     # three fields, so a bad one is answered with a sentence and the field it
                     # belongs to rather than a validation code — someone is watching a form
                     # with her face next to it.
@@ -664,7 +668,7 @@ def create_app() -> FastAPI:
         # selling GPU-hours has a rate card, a competitor and a site to walk you round.
         rows = sorted(
             state.agents.list_agents(),
-            key=lambda row: (row["tenant"] == LIV_TENANT, row["tenant"]),
+            key=lambda row: (row["tenant"] == NADIA_TENANT, row["tenant"]),
         )
         listed = []
         for row in rows:
@@ -707,9 +711,9 @@ def create_app() -> FastAPI:
         unpublished agent get the same answer as tenant zero rather than a 404, because
         distinguishing them for a stranger is an enumeration oracle.
         """
-        spec = state.agents.resolve(key) if key else state.agents.live(LIV_TENANT, LIV_AGENT)
+        spec = state.agents.resolve(key) if key else state.agents.live(NADIA_TENANT, NADIA_AGENT)
         if spec is None:
-            spec = state.agents.live(LIV_TENANT, LIV_AGENT)
+            spec = state.agents.live(NADIA_TENANT, NADIA_AGENT)
         if spec is None:  # pragma: no cover - the seed runs at startup
             return {"name": "", "company": "", "fields": ["name", "email"]}
         return {

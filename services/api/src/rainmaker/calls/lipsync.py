@@ -55,7 +55,7 @@ CHECKPOINT = MODEL_DIR / "wav2lip_gan.pth"
 PORTRAIT_FILE = Path(
     os.environ.get(
         "RAINMAKER_PORTRAIT_FILE",
-        Path(__file__).resolve().parents[5] / "apps" / "console" / "public" / "agent" / "liv.jpg",
+        Path(__file__).resolve().parents[5] / "apps" / "console" / "public" / "agent" / "nadia.jpg",
     )
 )
 
@@ -302,7 +302,7 @@ class FaceBox:
         return self.right - self.left, self.bottom - self.top
 
 
-#: Measured against `liv.jpg` (512x512): the lower half of the face, which is what Wav2Lip
+#: Measured against `nadia.jpg` (512x512): the lower half of the face, which is what Wav2Lip
 #: regenerates. Expressed as fractions so a replacement portrait of another size still lands.
 FACE_FRACTIONS = (0.30, 0.36, 0.86, 0.92)
 

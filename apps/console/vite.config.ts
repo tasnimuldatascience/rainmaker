@@ -2,6 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
+// Where the API is. Overridable because 8000 is a popular port and a developer who already
+// has something on it should not have to edit a tracked file to run this.
+const API = process.env.RAINMAKER_API ?? "http://127.0.0.1:8000";
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -18,12 +22,12 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
-    proxy: { "/api": { target: "http://127.0.0.1:8000", changeOrigin: true, ws: true } },
+    proxy: { "/api": { target: API, changeOrigin: true, ws: true } },
   },
   preview: {
     host: "127.0.0.1",
     port: 5174,
-    proxy: { "/api": { target: "http://127.0.0.1:8000", changeOrigin: true, ws: true } },
+    proxy: { "/api": { target: API, changeOrigin: true, ws: true } },
   },
   build: {
     outDir: "dist",

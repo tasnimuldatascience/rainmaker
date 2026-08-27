@@ -5,7 +5,7 @@
 TWO TOOLS, TWO DIFFERENT JOBS. `research_company` runs the full enrichment pipeline and returns
 typed facts with provenance. `browse` opens ONE page and returns what it says **plus a picture
 of it**, because on this product the browsing is not a background job — it is the demo. The
-prospect watches Liv open their pricing page and read it, which is the most direct way to show
+prospect watches Nadia open their pricing page and read it, which is the most direct way to show
 what an agent does before a call that a human would otherwise spend twenty minutes on.
 
 WHY THE SCREENSHOT COMES FROM HERE AND NOT THE CONSOLE. Every interesting site sets
@@ -134,7 +134,7 @@ async def browse(
         scrolled = False
         if scroll_to:
             # `scroll_into_view_if_needed` on a text locator, not a CSS query: the caller knows
-            # the phrase Liv is about to say, not the site's markup.
+            # the phrase Nadia is about to say, not the site's markup.
             locator = page.get_by_text(scroll_to, exact=False).first
             try:
                 await locator.scroll_into_view_if_needed(timeout=3000)

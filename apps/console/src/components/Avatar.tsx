@@ -1,5 +1,5 @@
 /**
- * Liv — the agent's face.
+ * Nadia — the agent's face.
  *
  * A VECTOR VISEME RIG, not a neural render. The architecture is deliberately the same one
  * MuseTalk uses:
@@ -214,7 +214,7 @@ export function Avatar({
       viewBox="0 0 200 200"
       preserveAspectRatio="xMidYMid slice"
       role="img"
-      aria-label={speaking ? "Liv, the AI agent, speaking" : "Liv, the AI agent, listening"}
+      aria-label={speaking ? "Nadia, the AI agent, speaking" : "Nadia, the AI agent, listening"}
       style={{ display: "block", background: "#171320" }}
       /* Rig state exposed on the element. Screenshot capture and future rendering tests can
          wait for a specific frame instead of sleeping and hoping -- the previous shots caught
@@ -225,50 +225,50 @@ export function Avatar({
       data-mouth-open={mh}
     >
       <defs>
-        <linearGradient id="liv-bg" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="nadia-bg" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#242c40" />
           <stop offset="100%" stopColor="#131722" />
         </linearGradient>
-        <linearGradient id="liv-hair" x1="0.15" y1="0" x2="0.9" y2="1">
+        <linearGradient id="nadia-hair" x1="0.15" y1="0" x2="0.9" y2="1">
           <stop offset="0%" stopColor="#57424b" />
           <stop offset="45%" stopColor="#3b2c33" />
           <stop offset="100%" stopColor="#251b20" />
         </linearGradient>
-        <linearGradient id="liv-skin" x1="0.2" y1="0" x2="0.8" y2="1">
+        <linearGradient id="nadia-skin" x1="0.2" y1="0" x2="0.8" y2="1">
           <stop offset="0%" stopColor="#f3cdb0" />
           <stop offset="100%" stopColor="#dcaa8a" />
         </linearGradient>
-        <linearGradient id="liv-jacket" x1="0.1" y1="0" x2="0.9" y2="1">
+        <linearGradient id="nadia-jacket" x1="0.1" y1="0" x2="0.9" y2="1">
           <stop offset="0%" stopColor="#3b4664" />
           <stop offset="100%" stopColor="#1f2534" />
         </linearGradient>
-        <linearGradient id="liv-shell" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="nadia-shell" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#aab5cc" />
           <stop offset="100%" stopColor="#8d99b4" />
         </linearGradient>
-        <radialGradient id="liv-cheek" cx="0.5" cy="0.5" r="0.5">
+        <radialGradient id="nadia-cheek" cx="0.5" cy="0.5" r="0.5">
           <stop offset="0%" stopColor="#d98474" stopOpacity="0.20" />
           <stop offset="100%" stopColor="#d98474" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id="liv-glow" cx="0.5" cy="0.42" r="0.55">
+        <radialGradient id="nadia-glow" cx="0.5" cy="0.42" r="0.55">
           <stop offset="0%" stopColor="var(--agent)" stopOpacity="0.22" />
           <stop offset="100%" stopColor="var(--agent)" stopOpacity="0" />
         </radialGradient>
-        <clipPath id="liv-face">
+        <clipPath id="nadia-face">
           {/* Must match the face path below: the fringe is drawn over the face and clipped to
               it, so the hairline is a curve rather than a helmet edge. */}
           <path d="M100 55 C81 55 72 70 72 91 C72 112 83 132 100 138 C117 132 128 112 128 91 C128 70 119 55 100 55 Z" />
         </clipPath>
       </defs>
 
-      <rect x="0" y="0" width="200" height="200" fill="url(#liv-bg)" />
+      <rect x="0" y="0" width="200" height="200" fill="url(#nadia-bg)" />
       {/* Speaking glow — a cheap, legible "she has the floor" cue. */}
       <rect
         x="0"
         y="0"
         width="200"
         height="200"
-        fill="url(#liv-glow)"
+        fill="url(#nadia-glow)"
         opacity={speaking ? 1 : 0.3}
         style={{ transition: "opacity 260ms ease" }}
       />
@@ -285,7 +285,7 @@ export function Avatar({
              C74 142 72 130 72 118 C72 100 70 88 74 78 C79 62 87 56 100 56
              C113 56 121 62 126 78 C130 88 128 100 128 118 C128 130 126 142 116 152
              C126 150 134 142 137 130 C140 116 138 100 139 84 C140 56 128 34 100 34 Z"
-          fill="url(#liv-hair)"
+          fill="url(#nadia-hair)"
         />
 
         {/* NECK — SHE DID NOT HAVE ONE. A head sat straight on a collar, and that single missing
@@ -293,37 +293,37 @@ export function Avatar({
             head-neck-shoulder line before it takes in a face. The shadow is cast by the jaw,
             not painted as a band across the throat, which is what the first attempt did and it
             looked like a collar sitting on a block. */}
-        <path d="M88 112 C88 128 86 138 82 145 C90 152 110 152 118 145 C114 138 112 128 112 112 Z" fill="url(#liv-skin)" />
+        <path d="M88 112 C88 128 86 138 82 145 C90 152 110 152 118 145 C114 138 112 128 112 112 Z" fill="url(#nadia-skin)" />
         <ellipse cx="100" cy="118" rx="15" ry="9" fill="#b07a58" opacity="0.30" />
 
         {/* SHOULDERS. A jacket, and its collar crosses in front of the neck base so the head
             sits INTO the clothes rather than balancing on them. The shell is muted rather than
             white: at tile size a bright triangle took the eye straight off her face. */}
-        <path d="M100 143 C133 144 158 157 164 200 L36 200 C42 157 67 144 100 143 Z" fill="url(#liv-jacket)" />
-        <path d="M100 154 L110 200 L90 200 Z" fill="url(#liv-shell)" />
-        <path d="M78 148 C86 143 94 141 100 141 L100 152 C94 154 90 158 88 164 L82 200 L66 200 Z" fill="url(#liv-jacket)" />
-        <path d="M122 148 C114 143 106 141 100 141 L100 152 C106 154 110 158 112 164 L118 200 L134 200 Z" fill="url(#liv-jacket)" />
+        <path d="M100 143 C133 144 158 157 164 200 L36 200 C42 157 67 144 100 143 Z" fill="url(#nadia-jacket)" />
+        <path d="M100 154 L110 200 L90 200 Z" fill="url(#nadia-shell)" />
+        <path d="M78 148 C86 143 94 141 100 141 L100 152 C94 154 90 158 88 164 L82 200 L66 200 Z" fill="url(#nadia-jacket)" />
+        <path d="M122 148 C114 143 106 141 100 141 L100 152 C106 154 110 158 112 164 L118 200 L134 200 Z" fill="url(#nadia-jacket)" />
         <path d="M78 148 C86 143 94 141 100 141 L100 145 C93 148 89 154 87 162 L82 200 L76 200 L82 158 C84 152 87 150 78 148 Z" fill="#000" opacity="0.20" />
         <path d="M122 148 C114 143 106 141 100 141 L100 145 C107 148 111 154 113 162 L118 200 L124 200 L118 158 C116 152 113 150 122 148 Z" fill="#fff" opacity="0.06" />
 
         {/* face */}
         <path
           d="M100 55 C81 55 72 70 72 91 C72 112 83 132 100 138 C117 132 128 112 128 91 C128 70 119 55 100 55 Z"
-          fill="url(#liv-skin)"
+          fill="url(#nadia-skin)"
         />
-        <ellipse cx="82" cy="104" rx="9" ry="6" fill="url(#liv-cheek)" />
-        <ellipse cx="118" cy="104" rx="9" ry="6" fill="url(#liv-cheek)" />
+        <ellipse cx="82" cy="104" rx="9" ry="6" fill="url(#nadia-cheek)" />
+        <ellipse cx="118" cy="104" rx="9" ry="6" fill="url(#nadia-cheek)" />
 
         {/* ears — part of why a head reads as a head rather than as an oval */}
-        <ellipse cx="71.6" cy="96" rx="3.4" ry="5.6" fill="url(#liv-skin)" />
-        <ellipse cx="128.4" cy="96" rx="3.4" ry="5.6" fill="url(#liv-skin)" />
+        <ellipse cx="71.6" cy="96" rx="3.4" ry="5.6" fill="url(#nadia-skin)" />
+        <ellipse cx="128.4" cy="96" rx="3.4" ry="5.6" fill="url(#nadia-skin)" />
 
         {/* fringe: a side sweep, clipped to the face */}
         <path
           d="M69 94 C67 62 82 50 100 50 C120 50 132 61 131 92
              C127 73 117 65 102 66 C90 67 80 74 74 86 C71 90 70 92 69 94 Z"
-          fill="url(#liv-hair)"
-          clipPath="url(#liv-face)"
+          fill="url(#nadia-hair)"
+          clipPath="url(#nadia-face)"
         />
 
         {/* brows */}
@@ -393,8 +393,8 @@ export function Avatar({
         </g>
 
         {/* hair over the shoulder, which is what puts the head IN the scene rather than on it */}
-        <path d="M72 118 C71 134 74 146 84 152 C76 154 68 148 65 138 C63 130 64 122 66 116 Z" fill="url(#liv-hair)" />
-        <path d="M128 118 C129 134 126 146 116 152 C124 154 132 148 135 138 C137 130 136 122 134 116 Z" fill="url(#liv-hair)" />
+        <path d="M72 118 C71 134 74 146 84 152 C76 154 68 148 65 138 C63 130 64 122 66 116 Z" fill="url(#nadia-hair)" />
+        <path d="M128 118 C129 134 126 146 116 152 C124 154 132 148 135 138 C137 130 136 122 134 116 Z" fill="url(#nadia-hair)" />
       </g>
     </svg>
   );

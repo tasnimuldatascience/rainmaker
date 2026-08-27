@@ -1,10 +1,10 @@
 """What an agent IS, as data rather than as code.
 
-THIS IS THE FILE THAT TURNS A DEMO INTO A PRODUCT. Until now "Liv, who works at Rainmaker and
+THIS IS THE FILE THAT TURNS A DEMO INTO A PRODUCT. Until now "Nadia, who works at Rainmaker and
 may say these eleven things about it" lived in constants in `calls/session.py`: the agent was
 compiled, and shipping a second one meant a release. Rainmaker sells the agent to other
 businesses, each of whom points it at their own buyers, so the agent has to be a row someone
-edits — persona, knowledge, prices, voice, face — and Liv has to be the first row rather than a
+edits — persona, knowledge, prices, voice, face — and Nadia has to be the first row rather than a
 special case. If our own demo runs down a different path from the one customers get, it drifts,
 and we end up demonstrating something we do not sell.
 
@@ -40,9 +40,42 @@ MAX_KNOWLEDGE_ITEMS = 60
 MAX_KNOWLEDGE_CHARS = 600
 MAX_TIERS = 6
 
-#: The voices the platform offers. A tenant naming a voice that does not exist should be told
-#: at publish time, not discovered when their agent opens its mouth in front of a customer.
-VOICES = ("liv", "female-warm", "female-clear", "male-warm", "male-us")
+#: Every voice the platform offers, and the Kokoro voice behind each.
+#:
+#: ONE TABLE, BECAUSE TWO OF THEM DRIFTED. The list a tenant is validated against lived here and
+#: the list the synthesiser could actually produce lived in `calls/providers.py`, and they
+#: stopped agreeing: `female-british` and `male-british` existed in the engine and were rejected
+#: at publish time, while `male-us` validated and was an alias nothing documented. A tenant
+#: hitting either of those learns about it in front of a customer.
+#:
+#: CHOSEN BY GRADE, NOT BY NAME. Kokoro publishes a quality grade per voice that tracks how much
+#: training data it had, and it predicts how stable each one sounds. There are fifty-four in the
+#: pack; these are the ones worth putting on a sales call.
+#:
+#: The demo agent was on `bf_isabella`, which is graded C — and measurably the worst of the set
+#: on the thing that matters here: it peaks at 1.14 on our own quote sentence, above full scale.
+#: That is digital clipping, it is a hard distortion, and it is one of the things people mean
+#: when they say a voice sounds synthetic. `af_heart` (grade A) reads the same sentence at 0.45.
+#:
+#: `af_nicole` is graded B- and is excluded on measurement rather than grade: the same line takes
+#: 19.6 seconds against 12 for the others, because it is a breathy ASMR voice. On a sales call
+#: that is not a voice, it is a mood.
+VOICE_CATALOGUE: dict[str, tuple[str, str]] = {
+    # name              kokoro        language    grade
+    "female-warm": ("af_heart", "en-us"),  # A
+    "female-clear": ("af_bella", "en-us"),  # A-
+    "female-british": ("bf_emma", "en-gb"),  # B-
+    "male-warm": ("am_michael", "en-us"),  # C+
+    "male-british": ("bm_george", "en-gb"),  # C
+}
+
+#: The names a tenant may write, for the publish-time check and its error message. A tenant
+#: naming a voice that does not exist should be told at publish time, not discovered when their
+#: agent opens its mouth in front of a customer.
+VOICES = tuple(VOICE_CATALOGUE)
+
+#: What an agent gets when nobody chose. The highest-graded voice in the pack.
+DEFAULT_VOICE = "female-warm"
 
 
 #: Phrases that actually tell someone they are not talking to a person. Deliberately about
@@ -142,6 +175,103 @@ class Intake:
             "require_work_email": self.require_work_email,
             "fields": list(self.fields()),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class Need:
+    """A reason somebody buys this, and how to recognise it in what research found.
+
+    THIS IS THE MISSING LINK BETWEEN READING A SITE AND SELLING SOMETHING. Research produces
+    facts about the BUYER; the agent sells a product. Nothing connected the two, so the agent
+    did the only thing left: it read the facts out. On a real call that came out as "I noticed
+    you're currently hiring four positions: Production Associates, Product Manager, Research and
+    Development Engineer, and Sales and Marketing Specialist" — from an agent that rents GPUs.
+    Four job titles, read back to the person who wrote them, none of them about GPUs.
+
+    A seller does not recite what they found. They form a hypothesis: *this suggests you are
+    doing X, which means you need Y — am I right?* The hypothesis is the product of a signal and
+    a reason to buy, and the reason to buy is not something a language model should invent about
+    a tenant's business. So the tenant writes it down.
+
+        Need(
+            signals=("machine learning", "training", "model"),
+            means="they are training models and will be short of capacity",
+            opener="it looks like you're training models already, and capacity is the constraint",
+            ask="what are you training at the moment, and what are you training it on?",
+        )
+
+    WHY `means` AND `opener` BOTH EXIST, when they say the same thing. One is read by a language
+    model and one is read out loud, and they are written in different persons because of it.
+    `means` is third person: it goes into the system prompt as a belief the agent holds ABOUT
+    the buyer, where "you" already refers to the agent and a second-person sentence would invert
+    who it is about. `opener` is second person: it is said TO the buyer, and no model touches it.
+    This repository already splits a price the same way — `total_display` for the eye and
+    `spoken` for the ear — for the same reason: two senses, two representations, and converging
+    them breaks one of them.
+
+    `signals` are matched against the facts research returned. `ask` is the one question that
+    checks the hypothesis, written by the tenant because a wrong question is worse than no
+    question — and spoken exactly as written, for the same reason.
+    """
+
+    #: Words that suggest this need, matched case-insensitively against research facts.
+    signals: tuple[str, ...]
+    #: What the agent may say those signals imply, in the THIRD person. For the model's context.
+    means: str
+    #: The same belief in the SECOND person, said to the buyer verbatim. Lower case, no full
+    #: stop: it is dropped into the middle of the opening sentence.
+    opener: str
+    #: The single question that checks the hypothesis. Spoken exactly as written.
+    ask: str
+
+    def validate(self) -> None:
+        """A half-written need is worse than none: it is spoken.
+
+        `opener` and `ask` go to a prospect verbatim, so a blank one is not a missing feature,
+        it is a sentence with a hole in it — "I had a quick look at acme.dev. , ." Caught at
+        publish time, which is the only moment anybody is looking.
+        """
+        if not self.signals or not any(s.strip() for s in self.signals):
+            raise SpecError("a need with no signals can never match anything")
+        for field_name in ("means", "opener", "ask"):
+            if not getattr(self, field_name).strip():
+                raise SpecError(
+                    f"need {self.signals[0]!r} has no {field_name}; it is said out loud, so it "
+                    f"cannot be blank"
+                )
+
+    def score(self, text: str) -> int:
+        """How strongly this need shows up in a piece of text."""
+        lowered = text.lower()
+        return sum(1 for signal in self.signals if signal and signal.lower() in lowered)
+
+    def narrow(self, fact: str) -> str:
+        """The smallest part of a fact that still carries this need.
+
+        TELLING A SMALL MODEL "DO NOT LIST IT" WHILE SHOWING IT A LIST DOES NOT WORK. Research
+        facts arrive as `label: item, item, item` — eight technologies, five job titles — and a
+        1.5B model handed that list plus a prohibition reads the list out anyway. It is not
+        disobeying; the list is the most concrete thing in its context.
+
+        So the list never reaches the prompt. This keeps only the items that carry the signal,
+        at most two of them, which is also what a person would have noticed:
+
+            "Currently hiring (4 open roles): Production Associate, Product Manager,
+             Research and Development Engineer, Sales and Marketing Specialist"
+                -> "Research and Development Engineer"
+
+            "Technology on their site: express, rails, aws, azure, snowflake, react, java"
+                -> "aws and azure"
+        """
+        _, separator, body = fact.partition(": ")
+        body = body if separator else fact
+        items = [part.strip() for part in re.split(r"[,;]", body) if part.strip()]
+        if len(items) <= 1:
+            return body.strip()
+        # Fall back to the whole list only when nothing in it matched — which cannot happen on
+        # the path that calls this, but a `Need` is tenant data and this must not raise.
+        hits = [item for item in items if self.score(item)] or items
+        return hits[0] if len(hits) == 1 else " and ".join(hits[:2])
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,15 +381,15 @@ class AgentSpec:
     version: int = 1
 
     # ── identity ────────────────────────────────────────────────────────
-    name: str = "Liv"
+    name: str = "Nadia"
     company: str = "Rainmaker"
     persona: str = "a direct, well-prepared account executive who does not oversell"
     objective: str = (
         "Understand what the prospect is trying to fix, and find out whether it is worth "
         "putting a person on the next call."
     )
-    voice: str = "liv"
-    portrait: str = "/agent/liv.jpg"
+    voice: str = DEFAULT_VOICE
+    portrait: str = "/agent/nadia.jpg"
 
     # ── what it may say ─────────────────────────────────────────────────
     knowledge: tuple[Fact, ...] = ()
@@ -274,12 +404,16 @@ class AgentSpec:
 
     #: What the front door asks for before the call starts.
     #:
-    #: A B2B AGENT AND A DENTIST DO NOT ASK THE SAME QUESTIONS. Liv needs a work address —
+    #: A B2B AGENT AND A DENTIST DO NOT ASK THE SAME QUESTIONS. Nadia needs a work address —
     #: the domain is where the research browser points, and it is the qualifying question.
     #: A dental practice asking a patient for their work email and their company is asking a
     #: person in pain to identify their employer, and the defaults must not make that the
     #: normal case just because the first tenant is a software company.
     intake: Intake = field(default_factory=lambda: Intake())
+
+    #: Why people buy this, and how to spot each reason in what research found. Without these
+    #: the agent can read a website and cannot do anything with what it read.
+    needs: tuple[Need, ...] = ()
 
     #: Where the agent takes a buyer to show the product.
     tour: tuple[TourStop, ...] = ()
@@ -326,6 +460,8 @@ class AgentSpec:
             )
         for fact in self.knowledge:
             fact.validate()
+        for need in self.needs:
+            need.validate()
         if len(self.pricing) > MAX_TIERS:
             raise SpecError(f"{len(self.pricing)} tiers is more than a caller can hold")
         for tier in self.pricing:
@@ -440,6 +576,15 @@ class AgentSpec:
                 for c in self.competitors
             ],
             "pricing_note": self.pricing_note,
+            "needs": [
+                {
+                    "signals": list(n.signals),
+                    "means": n.means,
+                    "opener": n.opener,
+                    "ask": n.ask,
+                }
+                for n in self.needs
+            ],
             "intake": self.intake.as_dict(),
             "tools": list(self.tools),
             "step_objectives": [list(pair) for pair in self.step_objectives],
@@ -460,12 +605,12 @@ class AgentSpec:
             tenant=raw["tenant"],
             agent_id=raw["agent_id"],
             version=int(raw.get("version", 1)),
-            name=raw.get("name", "Liv"),
+            name=raw.get("name", "Nadia"),
             company=raw.get("company", "Rainmaker"),
             persona=raw.get("persona", AgentSpec.persona),
             objective=raw.get("objective", AgentSpec.objective),
-            voice=raw.get("voice", "liv"),
-            portrait=raw.get("portrait", "/agent/liv.jpg"),
+            voice=raw.get("voice", DEFAULT_VOICE),
+            portrait=raw.get("portrait", "/agent/nadia.jpg"),
             knowledge=tuple(
                 Fact(text=f["text"], source=f.get("source", ""), topic=f.get("topic", ""))
                 for f in raw.get("knowledge", [])
@@ -498,6 +643,15 @@ class AgentSpec:
                 for c in raw.get("competitors", [])
             ),
             pricing_note=raw.get("pricing_note", ""),
+            needs=tuple(
+                Need(
+                    signals=tuple(n.get("signals", ())),
+                    means=n.get("means", ""),
+                    opener=n.get("opener", ""),
+                    ask=n.get("ask", ""),
+                )
+                for n in raw.get("needs", [])
+            ),
             intake=Intake(
                 ask_company=bool((raw.get("intake") or {}).get("ask_company", True)),
                 require_work_email=bool(

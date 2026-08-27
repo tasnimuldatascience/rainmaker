@@ -1,4 +1,4 @@
-"""The MCP client: everything Liv can reach for, and the rules about how she reaches.
+"""The MCP client: everything Nadia can reach for, and the rules about how she reaches.
 
 WHY MCP RATHER THAN FUNCTION CALLS. Booking a meeting could be a method on the call session. It
 is a protocol instead because **the tools are where this product meets a customer's systems**,
@@ -93,7 +93,7 @@ class ToolError(RuntimeError):
         super().__init__(f"{tool}: {detail}")
         self.tool = tool
         self.detail = detail
-        #: What Liv should say about it. A stack trace is not a sentence.
+        #: What Nadia should say about it. A stack trace is not a sentence.
         self.spoken = spoken or "I could not get that done just now — let me have someone follow up."
 
 
@@ -180,7 +180,7 @@ class ToolBroker:
     async def start(self) -> None:
         """Spawn and initialise every enabled server. Never raises.
 
-        A missing tool degrades the call; it does not prevent one. If the calendar is down Liv
+        A missing tool degrades the call; it does not prevent one. If the calendar is down Nadia
         can still research, demo and hand off — she just cannot book, and the agenda knows that
         before she promises anything.
         """
@@ -270,7 +270,7 @@ class ToolBroker:
 
         Raises `ToolError` for everything — a missing server, a timeout, a tool that raised —
         because the caller is a conversation and every one of those has the same consequence:
-        Liv has to say something true and keep going.
+        Nadia has to say something true and keep going.
         """
         spec = self.tools.get(qualified)
         if spec is None:

@@ -11,7 +11,7 @@ the call was happening.
 
 WHICH IS THE POINT WORTH MAKING ABOUT MCP HERE. Exposing the CRM as a tool server is not a
 wrapper over a database — it is the log, addressed through the protocol, so an agent that is not
-Liv (a customer's own automation, another vendor's agent) can record an outcome without being
+Nadia (a customer's own automation, another vendor's agent) can record an outcome without being
 given a database handle.
 
 A CALL IS ITS OWN ENTITY, NOT TEXT SMEARED INTO A DEAL'S NOTES. The first version of this
@@ -47,7 +47,7 @@ WORKSPACE = os.environ.get("RAINMAKER_WORKSPACE", "demo")
 #: The actor id every op from this server carries. A distinct one on purpose: a rep looking at a
 #: deal should be able to tell what the agent changed from what a colleague changed, and the
 #: CRDT needs a stable id to break concurrent-write ties consistently.
-ACTOR = "liv-agent"
+ACTOR = "nadia-agent"
 
 server = MCPServer(
     "rainmaker-crm",

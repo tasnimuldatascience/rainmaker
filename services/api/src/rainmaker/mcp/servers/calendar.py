@@ -7,7 +7,7 @@ RUN IT LIKE ANY MCP SERVER:
 It speaks JSON-RPC over stdio and works in Claude Desktop, in `mcp dev`, or in anything else
 that speaks the protocol. That is the point of building it this way rather than as a function
 the call loop imports: **the tools are the integration surface**. A customer who already runs
-Google Calendar or Cal.com swaps the server entry in `mcp.toml` and Liv books into their
+Google Calendar or Cal.com swaps the server entry in `mcp.toml` and Nadia books into their
 calendar with no change to Rainmaker — see `rainmaker/mcp/client.py`.
 
 WHY A LOCAL SERVER IS THE DEFAULT. Every hosted calendar needs an OAuth app and an account, and

@@ -36,6 +36,7 @@ from .spec import (
     Competitor,
     Fact,
     Guardrails,
+    Need,
     SpecError,
     Tier,
     TourStop,
@@ -45,6 +46,15 @@ log = logging.getLogger("rainmaker.agents")
 
 DATA_DIR = Path(os.environ.get("RAINMAKER_DATA", "data"))
 DB_PATH = Path(os.environ.get("RAINMAKER_AGENTS_DB", DATA_DIR / "agents.sqlite3"))
+
+#: Where the console is served from, for the pages the tour drives to.
+#:
+#: OVERRIDABLE BECAUSE 5173 IS NOT A PROMISE. Vite takes the next free port when its default is
+#: busy, and a developer who already has something on 5173 gets 5174 without being asked — at
+#: which point a hardcoded tour navigates a live demo to a page that is not there. The rest of
+#: this repository already parameterises the same host (`CORS_ORIGINS`,
+#: `RAINMAKER_CHECKOUT_BASE`); this was the one place it did not.
+CONSOLE = os.environ.get("RAINMAKER_CONSOLE", "http://localhost:5173").rstrip("/")
 
 
 class AgentStore:
@@ -218,27 +228,27 @@ def _mint_key() -> str:
 # ───────────────────────────────────────────────────────────── tenant zero
 #: Rainmaker's own agent, expressed the same way a customer's would be.
 #:
-#: THIS IS THE POINT OF THE WHOLE FILE. Liv used to be constants in `calls/session.py`. She is
+#: THIS IS THE POINT OF THE WHOLE FILE. Nadia used to be constants in `calls/session.py`. She is
 #: now a row loaded through exactly the path a customer's agent takes, so the demo cannot drift
 #: away from the product: if configuration breaks, our own front page breaks with it.
-LIV_TENANT = "rainmaker"
-LIV_AGENT = "liv"
+NADIA_TENANT = "rainmaker"
+NADIA_AGENT = "nadia"
 
 
-def liv_spec() -> AgentSpec:
+def nadia_spec() -> AgentSpec:
     """Rainmaker's own agent, configured the way a customer configures theirs.
 
     WHAT SHE SELLS IS THE AGENT ITSELF, which makes her the product demonstrating itself: a
-    buyer asking Liv how Rainmaker works is watching Rainmaker work. The knowledge below is
+    buyer asking Nadia how Rainmaker works is watching Rainmaker work. The knowledge below is
     written as a salesperson would say it, not as documentation — the earlier version led with
     "the console is offline-first", which is a true sentence about a CRDT and not a reason
     anybody buys anything.
     """
     return AgentSpec(
-        tenant=LIV_TENANT,
-        agent_id=LIV_AGENT,
+        tenant=NADIA_TENANT,
+        agent_id=NADIA_AGENT,
         version=1,
-        name="Liv",
+        name="Nadia",
         company="Rainmaker",
         persona="a direct, well-prepared account executive who does not oversell",
         objective=(
@@ -249,7 +259,7 @@ def liv_spec() -> AgentSpec:
         # A different voice from the demo tenant's, so two agents on one machine are told apart
         # by ear. Both are top-graded; see `providers.KokoroTextToSpeech.VOICES`.
         voice="female-clear",
-        portrait="/agent/liv.jpg",
+        portrait="/agent/nadia.jpg",
         knowledge=(
             Fact(
                 "Rainmaker is an AI sales agent that talks to your buyers the moment they land "
@@ -309,9 +319,53 @@ def liv_spec() -> AgentSpec:
                 topic="security",
             ),
         ),
+        # WHY ANYBODY BUYS AN AI SALES AGENT, and how to spot each reason in a website. The
+        # agent reads a prospect's site and has to do something with what it read; without this
+        # it reads the findings out, which is not selling.
+        needs=(
+            Need(
+                signals=(
+                    "book a demo", "request a demo", "contact sales", "talk to sales",
+                    "get a quote", "free trial", "sign up", "pricing",
+                ),
+                means=(
+                    "they take inbound demand through a form, so every buyer who arrives out "
+                    "of hours waits for somebody to get back to them"
+                ),
+                opener=(
+                    "it looks like interested buyers reach you through a form, which means the "
+                    "ones who turn up out of hours wait"
+                ),
+                ask="who picks up a demo request that lands at eleven at night?",
+            ),
+            Need(
+                signals=(
+                    "sales", "account executive", "sdr", "business development", "revenue",
+                    "go-to-market", "hiring",
+                ),
+                means=(
+                    "they are adding sales headcount, which is the expensive way to answer more "
+                    "buyers faster"
+                ),
+                opener=(
+                    "it looks like you are growing the sales team, which is the expensive way "
+                    "to get back to more buyers faster"
+                ),
+                ask="how long does a new rep take to get productive with you?",
+            ),
+            Need(
+                signals=("support", "help centre", "help center", "chat", "live chat", "faq"),
+                means="they already answer questions in a widget that cannot sell anything",
+                opener=(
+                    "it looks like you already answer questions in a chat widget, and that "
+                    "widget cannot sell anybody anything"
+                ),
+                ask="does that chat ever turn into a real sales conversation?",
+            ),
+        ),
         tour=(
             TourStop(
-                url="http://localhost:5173/demo/tessera.html",
+                url=f"{CONSOLE}/demo/tessera.html",
                 label="an agent on a customer's site",
                 shows=(
                     "a real customer's website with their own agent in the corner - their name, "
@@ -321,7 +375,7 @@ def liv_spec() -> AgentSpec:
                 answers=("how it works", "embed", "website", "install", "set up", "look like"),
             ),
             TourStop(
-                url="http://localhost:5173/",
+                url=f"{CONSOLE}/",
                 label="the pipeline the calls write into",
                 shows=(
                     "the deals board a rep works from, with the outcome and transcript of every "
@@ -379,8 +433,8 @@ def liv_spec() -> AgentSpec:
 def seed(store: AgentStore) -> AgentSpec:
     """Make sure tenant zero exists and is published, and matches the code.
 
-    IDEMPOTENT, BUT NOT INERT, and the difference cost a whole debugging session. Liv is defined
-    in `liv_spec()` rather than in a builder, so a change to her — a new tour stop, a competitor,
+    IDEMPOTENT, BUT NOT INERT, and the difference cost a whole debugging session. Nadia is defined
+    in `nadia_spec()` rather than in a builder, so a change to her — a new tour stop, a competitor,
     a price with an amount on it — is a code change. A seed that returned early whenever any
     version was live meant the running agent was whatever had been seeded first: the tour was
     empty and the comparison step fell through to the model, silently, on a database nobody
@@ -389,14 +443,14 @@ def seed(store: AgentStore) -> AgentSpec:
     A tenant's own agent is the opposite case and is left alone: their versions are theirs, and
     nothing here writes one.
     """
-    existing = store.live(LIV_TENANT, LIV_AGENT)
-    wanted = liv_spec()
+    existing = store.live(NADIA_TENANT, NADIA_AGENT)
+    wanted = nadia_spec()
     if existing is not None and _same_agent(existing, wanted):
         return existing
 
     # A new version rather than an edit of the live one: publishing is a pointer move, so an
     # upgrade cannot alter an agent underneath somebody who is mid-conversation with it.
-    versions = store.versions(LIV_TENANT, LIV_AGENT)
+    versions = store.versions(NADIA_TENANT, NADIA_AGENT)
     saved = store.save(replace(wanted, version=max(versions) + 1 if versions else wanted.version))
     return store.publish(saved.tenant, saved.agent_id, saved.version)
 

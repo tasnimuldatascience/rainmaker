@@ -170,6 +170,48 @@ _DEPT = {
 }
 
 
+#: The nouns a job title ends on.
+#:
+#: WHY THE PATTERN ABOVE IS NOT ENOUGH. `_ROLE` finds a department word at the start of a line
+#: and then takes up to forty more characters of it — which on a real careers page is usually
+#: the rest of a marketing sentence. Run against stripe.com it produced, as open roles:
+#:
+#:     "AI is replatforming the global economy"
+#:     "Products and pricing Pricing Atlas Authorizatio"
+#:
+#: Neither contains sentence punctuation, so the existing "does it look like a sentence" check
+#: passed both. That check asks what a title is NOT. This asks what one IS: a noun phrase that
+#: lands on a role, which is how a person recognises one at a glance.
+#:
+#: This matters more than it reads. The opening line of a call now speaks the strongest research
+#: finding verbatim — see `Need.narrow` and `Agenda._open` — so a sentence that got this far
+#: would be read out loud to the person whose careers page it was taken from.
+_ROLE_NOUNS = (
+    "engineer", "developer", "architect", "scientist", "analyst", "researcher",
+    "manager", "director", "lead", "head", "officer", "president", "chief",
+    "designer", "specialist", "associate", "consultant", "coordinator",
+    "administrator", "technician", "strategist", "marketer", "advocate",
+    "representative", "recruiter", "counsel", "partner", "writer", "producer",
+    "intern", "apprentice", "generalist", "operator", "accountant", "controller",
+)
+
+#: "Head of Sales" and "VP of Engineering" end on a department rather than on a role, and are
+#: unambiguously job titles anyway.
+_ROLE_PREFIXES = ("head of", "vp of", "vice president of", "director of", "chief")
+
+
+def _is_job_title(title: str) -> bool:
+    """Whether a matched line is plausibly a job title rather than a sentence about one."""
+    words = title.lower().split()
+    if not (1 < len(words) <= 7):
+        return False
+    if any(title.lower().startswith(prefix) for prefix in _ROLE_PREFIXES):
+        return True
+    # The last word carries it — "Research and Development Engineer" is a title and
+    # "Research and Development is how we grow" is not, and only the ending separates them.
+    return words[-1].rstrip("s") in _ROLE_NOUNS or words[-1] in _ROLE_NOUNS
+
+
 def extract_hiring(pages: list[Page]) -> list[HiringSignal]:
     roles: dict[str, HiringSignal] = {}
     for page in pages:
@@ -178,6 +220,8 @@ def extract_hiring(pages: list[Page]) -> list[HiringSignal]:
         for match in _ROLE.finditer(page.markdown):
             title = " ".join(match.group(1).split())[:80]
             if len(title) < 6 or title.lower() in roles:
+                continue
+            if not _is_job_title(title):
                 continue
             roles[title.lower()] = HiringSignal(
                 title=title,
