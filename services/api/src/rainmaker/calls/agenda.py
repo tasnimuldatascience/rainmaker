@@ -33,7 +33,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
-from ..agents.quoting import build_quote, seats_from_conversation, unit_words
+from ..agents.quoting import (
+    build_quote,
+    money_words,
+    duration_from_conversation,
+    rate_period,
+    seats_from_conversation,
+    unit_words,
+)
 from .intake import Contact
 from .pipeline import Finished, LatencyBudget, Spoke, TurnEvent, TurnResult, _wants_human
 from .session import CallSession, Prospect, clean_company_name, facts_from_enrichment
@@ -136,6 +143,30 @@ AgendaEvent = TurnEvent | Panel | Phase
 #: model is consulted, because these are the moments where guessing is expensive.
 _INTENTS: tuple[tuple[Step, re.Pattern[str]], ...] = (
     (
+        # FIRST, BECAUSE IT IS TERMINAL. A buyer winding the call up often says why in the same
+        # breath — "thanks, that's all for now" — and if BOOKING or QUOTE matched first the
+        # call would carry on selling to somebody who has already said they are done.
+        #
+        # THE ONE INTENT THAT DID NOT EXIST. `Step.WRAP`, `_wrap` and `end` were all written and
+        # nothing routed to them, so "thanks, that's all for now" matched nothing, fell through
+        # to an ordinary turn, and got "Great! Let me know if you need anything else." The call
+        # never closed, never wrote itself down, and sat on whatever step it had reached.
+        #
+        # Deliberately not "thanks" on its own: "thanks, can you book something?" is the middle
+        # of a call, not the end of one. It takes an actual closing phrase.
+        Step.WRAP,
+        re.compile(
+            r"\b(?:that'?s (?:all|it|everything|great,? thanks)"
+            r"|(?:i'?m|we'?re) (?:all )?(?:done|good|set|sorted)"
+            r"|nothing else|no(?:thing)? more"
+            r"|thanks? (?:for|so much for) (?:your |the )?(?:time|help)"
+            r"|(?:i|we) (?:have|need|gotta|got to|have to) (?:to )?(?:go|run|jump off|drop)"
+            r"|good ?bye|bye for now|speak soon|talk (?:to you )?(?:soon|later)"
+            r"|let'?s (?:leave|wrap) it (?:there|up)|end the call|hang up)\b",
+            re.I,
+        ),
+    ),
+    (
         Step.BOOKING,
         re.compile(
             # HOW PEOPLE ACTUALLY ASK FOR A PERSON: by their job. "Talk to an engineer" is the
@@ -197,6 +228,27 @@ _INTENTS: tuple[tuple[Step, re.Pattern[str]], ...] = (
 #:
 #: The agent asked the buyer to justify the buyer's own job adverts. A challenge is answered, in
 #: one sentence, with a reason — never with a question back.
+#: An opening word that makes a sentence a request rather than a statement.
+#:
+#: Buyers type without punctuation, so a question mark cannot be the only test — "do you have
+#: h100s" arrives exactly like that. These are the words that start one.
+_ASKING = re.compile(
+    r"^\s*(?:do|does|did|can|could|will|would|should|is|are|was|were|have|has|any|"
+    r"what|which|where|when|why|how|who|show|tell|give|walk|take|let'?s see|got)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_asking(text: str) -> bool:
+    """Whether this reads as a request rather than as a statement of their own situation.
+
+    Not a parser and not trying to be. It separates "do you have H100s" from "we need 32 H100s",
+    which is the distinction a tour trigger word cannot make on its own.
+    """
+    stripped = text.strip()
+    return stripped.endswith("?") or bool(_ASKING.match(stripped))
+
+
 def _opens(text: str) -> str:
     """`text` as the start of a sentence, with the rest of it left alone.
 
@@ -360,6 +412,8 @@ class Agenda:
         #: Seats the buyer stated, which beats anything research guessed. "We've got forty reps"
         #: is not small talk, it is the number on the quote.
         self.said_seats: int | None = None
+        #: How long they said they needed it for, for a rate unit. See `_quote`.
+        self.said_duration: tuple[float, str] | None = None
         self.quote: Any = None
         self.checkout: dict[str, Any] | None = None
         #: True once they have asked for a person, so the booking step says the handoff line.
@@ -548,6 +602,16 @@ class Agenda:
         if stated is not None:
             self.said_seats = stated
 
+        # AND HOW LONG FOR, WHEN THE UNIT IS A RATE. "32 H100s for a month" states the quantity
+        # and the duration in one breath, and a GPU-hour is only a number once both are known.
+        # Kept on the same every-turn footing as the count, and for the same reason: it arrives
+        # in passing during discovery, not in answer to a question about it.
+        period = rate_period(spec.pricing[0].unit_name) if spec and spec.pricing else ""
+        if period:
+            heard = duration_from_conversation(text, period)
+            if heard is not None:
+                self.said_duration = heard
+
         # An explicit ask outranks the plan. Someone who asks the price during discovery is
         # telling you what the call is about now.
         #
@@ -715,7 +779,22 @@ class Agenda:
         if spec is None:
             return None
         lowered = text.lower()
-        if any(
+
+        # ONLY WHEN THEY ARE ASKING. A tour stop's trigger words are nouns from the tenant's own
+        # product, and a buyer says those nouns for two completely different reasons:
+        #
+        #   "do you have H100s?"                    -> show me the capacity page
+        #   "we're training a 70B model, about      -> this is my requirement; you asked
+        #    32 H100s for a month"
+        #
+        # Matched as a substring, the second one drove the call straight to the tour: the buyer
+        # answered the discovery question and was shown a web page instead of being heard. The
+        # answer still counts — the quantity and duration are read off it further up — but it
+        # does not move the call.
+        #
+        # `detect_intent` is unaffected: its patterns are phrases like "show me" and "how much",
+        # which are requests whatever mood they are in.
+        if _is_asking(text) and any(
             topic and topic.lower() in lowered for stop in spec.tour for topic in stop.answers
         ):
             return Step.GUIDE
@@ -1046,6 +1125,7 @@ class Agenda:
         quote = build_quote(
             spec,
             said_seats=self.said_seats,
+            said_duration=self.said_duration,
             size_band=str(band),
             company=self.session.prospect.company or self.contact.company_guess,
         )
@@ -1227,7 +1307,45 @@ class Agenda:
             yield event
 
     async def _wrap(self, said: str) -> AsyncIterator[AgendaEvent]:
-        async for event in self._speak(said or "(Close the call.)"):
+        """Say what was agreed, say goodbye, and stop.
+
+        THE LAST SENTENCE OF A CALL IS A SUMMARY OF ITS COMMITMENTS, so it is not the model's.
+        Asked to "(Close the call.)" it produced "Great! Let me know if you need anything else."
+        — which is not a close, it is an invitation to keep going, and it left a buyer who had
+        just said they were done with nothing to confirm and no idea the call had ended.
+
+        A person winding up a sales call recites the outcome: the time that is now in the diary,
+        the number that is now on the screen, where the follow-up is going. Every one of those
+        is a fact this object already holds, and none of them is safe to paraphrase.
+        """
+        agreed: list[str] = []
+        if self.booking is not None and self.booking.get("spoken"):
+            agreed.append(f"You're booked in for {self.booking['spoken']}")
+        if self.checkout is not None:
+            agreed.append("the checkout link is on your screen whenever you're ready")
+        elif self.quote is not None:
+            # `money_words`, NOT `money`. `money` is the screen form and it starts with a "$",
+            # which a synthesiser reads as the word "dollar" placed BEFORE the digits. The quote
+            # sentence has said its own numbers in words since that was found; this line is
+            # spoken too and had quietly reintroduced it.
+            spoken_total = money_words(self.quote.total, self.quote.currency)
+            agreed.append(f"your numbers are on screen — {spoken_total}")
+        if self.wants_human and self.booking is None:
+            agreed.append("I'll get somebody to pick this up with you")
+
+        who = self.contact.first_name
+        closing = f"Thanks for your time{', ' + who if who else ''}."
+        if agreed:
+            # Joined with a full stop rather than a comma: each of these is a separate
+            # commitment and running them together is how one of them gets missed.
+            body = ". ".join(_opens(part) for part in agreed)
+            line = f"{body}. {closing}"
+        else:
+            # Nothing was agreed, and saying so is better than implying something was. The
+            # follow-up still goes out; `_close_out` drafts it either way.
+            line = f"{closing} I'll send you a short note with what we covered."
+
+        async for event in self._say(line):
             yield event
         async for event in self.end():
             yield event

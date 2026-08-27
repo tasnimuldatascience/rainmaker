@@ -20,6 +20,7 @@ guess and presented as a fact is how somebody agrees to the wrong number.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -139,6 +140,15 @@ class Quote:
     #: Where the seat count came from: "said", "research" or "assumed".
     seats_from: str
     company: str = ""
+    #: For a RATE unit, what the buyer actually said: how many things, for how long.
+    #:
+    #: A buyer of GPU-hours does not ask for 23,360 of them, they ask for "32 H100s for a
+    #: month". The arithmetic needs the product; the sentence needs both halves, or she answers
+    #: a question nobody asked. Empty for a unit that is not a rate, where the count IS the ask.
+    quantity: int = 0
+    duration_label: str = ""
+    #: The buyer's word for the thing, not the price list's: "GPUs", not "GPU-hours".
+    quantity_noun: str = ""
 
     @property
     def assumed(self) -> bool:
@@ -171,10 +181,21 @@ class Quote:
         each = money_words(self.unit_amount, self.currency)
         total = money_words(self.total, self.currency)
         opening = "For about " if self.assumed else "For "
-        line = (
-            f"{opening}{self.units} on {self.tier}, "
-            f"that's {each} per {self.unit_name}"
-        )
+        # SAY IT BACK THE WAY THEY ASKED IT. "For 23,360 GPU-hours" is arithmetically the same
+        # question and a different sentence: the buyer asked for 32 cards for a month and has
+        # no way to check a number they never said. Both halves, then the total.
+        if self.quantity and self.duration_label:
+            noun = f" {self.quantity_noun}" if self.quantity_noun else ""
+            asked = f"{self.quantity:,}{noun} for {self.duration_label}"
+            line = (
+                f"{opening}{asked} — that's {self.units} on {self.tier}, "
+                f"at {each} per {self.unit_name}"
+            )
+        else:
+            line = (
+                f"{opening}{self.units} on {self.tier}, "
+                f"that's {each} per {self.unit_name}"
+            )
         if self.discount:
             line += f", less {money_words(self.discount, self.currency)} for paying annually"
         return f"{line}, which comes to {total} a {self.period}."
@@ -200,8 +221,65 @@ class Quote:
             "discount_display": self.money(self.discount) if self.discount else "",
             "total": self.total,
             "total_display": self.money(self.total),
+            "quantity": self.quantity,
+            "quantity_noun": self.quantity_noun,
+            "duration_label": self.duration_label,
             "spoken": self.spoken(),
         }
+
+
+#: How many of the rate unit are in a stretch of calendar time.
+#:
+#: A MONTH IS 730 HOURS, NOT THIRTY. This table exists because a unit like "GPU-hour" is a RATE:
+#: the buyer states a quantity and a duration in the same breath — "32 H100s for a month" — and
+#: the number that goes into the arithmetic is the product of the two. Without it the duration
+#: was simply dropped, and "32 H100s for a month" was quoted as if it were a handful of hours.
+RATE_UNIT_HOURS: dict[str, float] = {
+    "hour": 1, "day": 24, "week": 168, "month": 730, "year": 8760,
+}
+
+#: "for a month", "for three months", "over 2 weeks", "for a couple of weeks".
+_DURATION = re.compile(
+    r"\b(?:for|over|across)?\s*(?:a|an|one|1|(?P<n>\d{1,4}|two|three|four|six|twelve)|couple\s+of)?"
+    r"\s*(?P<period>hour|day|week|month|year)s?\b",
+    re.IGNORECASE,
+)
+
+_DURATION_WORDS = {"two": 2, "three": 3, "four": 4, "six": 6, "twelve": 12}
+
+
+def rate_period(unit_name: str) -> str:
+    """The time word a rate unit is a rate over, or "" if it is not a rate.
+
+    "GPU-hour" -> "hour". "seat" -> "". A seat is a thing you have; a GPU-hour is a thing you
+    consume, and only the second one multiplies by a duration.
+    """
+    tail = unit_name.replace("-", " ").replace("/", " ").split()
+    return tail[-1].lower() if tail and tail[-1].lower() in RATE_UNIT_HOURS else ""
+
+
+def duration_from_conversation(text: str, period: str) -> tuple[float, str] | None:
+    """How long they said they needed it for, as a multiple of `period`, plus a label.
+
+    Returns `None` when no duration was stated — which is not the same as one, and must not be
+    treated as one: quoting a month when the buyer never said "month" is inventing the larger
+    half of the number.
+    """
+    if period not in RATE_UNIT_HOURS:
+        return None
+    for match in _DURATION.finditer(text):
+        said = match.group("period").lower()
+        if said == period and not match.group("n"):
+            # "for an hour" when the unit is the hour: a duration of one, not a multiplier.
+            continue
+        raw = (match.group("n") or "").lower()
+        count = _DURATION_WORDS.get(raw, int(raw) if raw.isdigit() else 1)
+        hours = RATE_UNIT_HOURS[said] * count / RATE_UNIT_HOURS[period]
+        if hours <= 1:
+            continue
+        label = f"{count} {said}s" if count > 1 else f"a {said}"
+        return hours, label
+    return None
 
 
 def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | None:
@@ -227,6 +305,11 @@ def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | Non
     tenant_words = "|".join(
         re.escape(word) + "s?" for word in dict.fromkeys(u.lower() for u in units if u)
     )
+    # THE UNIT IS NOT THE NOUN. `units` is what the price list calls it — "GPU-hour" — and no
+    # buyer says that; they say "32 H100s". A tenant whose product has a name of its own puts
+    # those words in `AgentSpec.unit_nouns`, and they are matched here alongside the built-in
+    # headcount words. Without this, "what does it cost for 32 H100s for a month" matched
+    # nothing and the quote fell back to a guessed size band.
     nouns = r"(?:seats?|licen[cs]es?|users?|reps?|people|staff|salespeople|agents?|of us"
     nouns += (f"|{tenant_words})" if tenant_words else ")")
     number = r"(?P<n>\d{1,3}(?:,\d{3})+|\d{1,7}|" + "|".join(words) + r")"
@@ -272,7 +355,9 @@ def pick_tier(spec: AgentSpec, seats: int) -> Tier | None:
 
 def unit_words(spec: AgentSpec) -> tuple[str, ...]:
     """Every word this tenant uses for what they sell, for the seat detector to listen for."""
-    found: list[str] = []
+    # What the BUYER calls it comes first: "H100", "node", "card". The price list's own word is
+    # often one nobody says out loud. See `AgentSpec.unit_nouns`.
+    found: list[str] = [noun for noun in spec.unit_nouns if noun]
     for tier in spec.pricing:
         found.extend([tier.unit_name, tier.unit_plural or f"{tier.unit_name}s"])
         # "GPU-hour" is also said as "GPU hour" and as "hour". The last word on its own is the
@@ -290,6 +375,7 @@ def build_quote(
     size_band: str = "",
     company: str = "",
     annual: bool = False,
+    said_duration: tuple[float, str] | None = None,
 ) -> Quote | None:
     """A quote, or nothing if this agent has no quotable pricing.
 
@@ -303,6 +389,17 @@ def build_quote(
         return None
 
     seats = max(seats, tier.min_seats)
+
+    # A RATE UNIT MULTIPLIES BY TIME. "32 H100s for a month" is 32 x 730 GPU-hours, and dropping
+    # the second half quoted thirty six dollars for eighty-four thousand dollars of compute.
+    # Only applied when the buyer actually stated a duration: assuming one would be inventing
+    # the larger half of the number.
+    quantity, duration_label = 0, ""
+    if said_duration and rate_period(tier.unit_name):
+        multiplier, duration_label = said_duration
+        quantity = seats
+        seats = max(1, min(MAX_SEATS, round(seats * multiplier)))
+
     period = spec.pricing_period
     subtotal = tier.unit_amount * seats
 
@@ -324,6 +421,11 @@ def build_quote(
         total=subtotal - discount,
         seats_from=seats_from,
         company=company,
+        quantity=quantity,
+        duration_label=duration_label,
+        quantity_noun=(
+            f"{spec.unit_nouns[0]}s" if quantity and spec.unit_nouns else ""
+        ),
     )
 
 

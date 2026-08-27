@@ -253,6 +253,13 @@ def tessera() -> AgentSpec:
         pricing_note="Per GPU-hour, billed per second. Reserved needs a month's commitment.",
         pricing_period="month",
         currency="usd",
+        # WHAT A BUYER CALLS IT, which is never "GPU-hour". They say "32 H100s", "a couple of
+        # nodes", "sixteen cards". Without these the quantity detector heard nothing in "what
+        # does it cost for 32 H100s for a month" and the quote fell back to a guessed size band
+        # — thirty six dollars a month, said out loud, for eighty-four thousand of compute.
+        unit_nouns=(
+            "GPU", "H100", "A100", "card", "node", "accelerator", "chip", "device",
+        ),
         # NOT AN ANNUAL DISCOUNT. Their commitment discount is already the difference between
         # two tiers, and stacking a second one on top would quote a number their price list
         # does not contain.

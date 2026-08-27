@@ -108,6 +108,18 @@ _SPELLED_OUT: tuple[tuple[re.Pattern[str], str], ...] = (
 #: between digits, so it cannot touch the comma in "forty seats, and".
 _THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 
+#: "$84,096" -> "84096 dollars".
+#:
+#: A LAST LINE OF DEFENCE, NOT THE MECHANISM. Money that is going to be SPOKEN is built by
+#: `quoting.money_words`, which writes it out in words and is the right answer — a price is a
+#: commitment and it gets the same treatment as a booked time. But `Quote.money` produces the
+#: screen form, the two live one method apart, and the wrong one reached a spoken line the very
+#: first time a new sentence was written. Read literally, "$84,096" is phonemised with the word
+#: "dollar" moved in FRONT of the digits, which is the single most obviously synthetic noise
+#: this product can make and it lands on the one sentence the whole call exists for.
+_CURRENCY = re.compile(r"([$£€])\s?(\d[\d,]*(?:\.\d{1,2})?)")
+_CURRENCY_NAMES = {"$": "dollars", "£": "pounds", "€": "euros"}
+
 # ── spoken register ──────────────────────────────────────────────────────────
 #: WHY CONTRACT AT ALL. "I am not going to pretend" and "I'm not going to pretend" mean the same
 #: thing and belong to different registers: nobody says the first one out loud. Written English
@@ -220,6 +232,10 @@ def say(text: str) -> str:
 
     for pattern, replacement in _SPELLED_OUT:
         out = pattern.sub(replacement, out)
+    # Before the thousands separator is stripped, so the amount is still recognisable as money.
+    out = _CURRENCY.sub(
+        lambda m: f"{m.group(2)} {_CURRENCY_NAMES[m.group(1)]}", out
+    )
     out = _THOUSANDS.sub("", out)
 
     for pattern, replacement in _CONTRACTIONS:

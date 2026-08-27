@@ -609,3 +609,86 @@ class TestTheVoiceTableIsOneTable:
 
         with pytest.raises(SpecError, match="unknown voice"):
             replace(nadia_spec(), voice="bf_isabella").validate()
+
+
+class TestARateUnitIsQuantityTimesTime:
+    """A GPU-hour is a rate. "32 H100s for a month" states both halves in one breath, and the
+    quote is only a number once both are known.
+
+    Asked "what does it cost for 32 H100s for a month", the agent said thirty six dollars a
+    month. The real figure is eighty-four thousand. Two failures stacked: "H100s" is not a word
+    the quantity detector knew, so it fell back to a guessed size band — and the duration was
+    dropped on the floor, because a seat count has never needed one.
+    """
+
+    @staticmethod
+    def gpu_spec() -> AgentSpec:
+        return AgentSpec(
+            tenant="t", agent_id="a", name="N", company="C",
+            pricing=(
+                Tier(name="On-demand", price="$3.60", unit_amount=360, unit_name="GPU-hour"),
+            ),
+            unit_nouns=("GPU", "H100", "A100", "card", "node"),
+            pricing_period="month",
+            currency="usd",
+        )
+
+    def test_the_buyers_noun_is_heard_even_though_the_price_list_uses_another(self):
+        from rainmaker.agents.quoting import seats_from_conversation, unit_words
+
+        spec = self.gpu_spec()
+        said = seats_from_conversation("for 32 H100s for a month", unit_words(spec))
+        assert said == 32
+
+    def test_a_duration_multiplies_a_rate_unit(self):
+        from rainmaker.agents.quoting import build_quote, duration_from_conversation
+
+        spec = self.gpu_spec()
+        quote = build_quote(
+            spec,
+            said_seats=32,
+            said_duration=duration_from_conversation("for a month", "hour"),
+        )
+        assert quote is not None
+        assert quote.seats == 32 * 730, quote.seats
+        assert quote.total == 32 * 730 * 360
+        assert quote.money(quote.total) == "$84,096"
+
+    def test_it_says_the_number_back_the_way_the_buyer_asked_for_it(self):
+        """"For 23,360 GPU-hours" is the same arithmetic and a different question: the buyer
+        asked for 32 cards for a month and cannot check a figure they never said."""
+        from rainmaker.agents.quoting import build_quote, duration_from_conversation
+
+        quote = build_quote(
+            self.gpu_spec(),
+            said_seats=32,
+            said_duration=duration_from_conversation("for a month", "hour"),
+        )
+        spoken = quote.spoken()
+        assert "32 GPUs for a month" in spoken, spoken
+        assert "23,360 GPU-hours" in spoken, spoken
+        assert "eighty four thousand ninety six dollars" in spoken, spoken
+        assert "$" not in spoken, "the ear never gets a currency symbol"
+
+    def test_a_seat_is_not_a_rate_and_is_not_multiplied(self):
+        from rainmaker.agents.quoting import build_quote, duration_from_conversation, rate_period
+
+        assert rate_period("seat") == ""
+        seats = AgentSpec(
+            tenant="t", agent_id="a", name="N", company="C",
+            pricing=(Tier(name="Team", price="$40", unit_amount=4000, unit_name="seat"),),
+        )
+        quote = build_quote(
+            seats, said_seats=40, said_duration=duration_from_conversation("for a month", "hour")
+        )
+        assert quote.seats == 40, "a seat count must not be multiplied by a duration"
+        assert quote.quantity == 0 and quote.duration_label == ""
+
+    def test_a_duration_that_was_never_stated_is_never_assumed(self):
+        """Quoting a month the buyer never mentioned invents the larger half of the number."""
+        from rainmaker.agents.quoting import build_quote, duration_from_conversation
+
+        assert duration_from_conversation("we need 32 H100s", "hour") is None
+        quote = build_quote(self.gpu_spec(), said_seats=32, said_duration=None)
+        assert quote.seats == 32
+        assert "for a month" not in quote.spoken()

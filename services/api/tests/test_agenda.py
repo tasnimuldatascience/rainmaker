@@ -1156,3 +1156,112 @@ class TestItSellsOnNeedRatherThanRecitingResearch:
         await collect(agenda.begin())
         assert agenda.need is not None
         assert "will run into compute" in agenda.session.profile.objective
+
+
+class TestSheKnowsHowToStop:
+    """`Step.WRAP`, `_wrap` and `end` were all written and nothing routed to them.
+
+    "thanks, that's all for now" matched no intent, fell through to an ordinary discovery turn,
+    and got back "Great! Let me know if you need anything else." The call never closed, never
+    wrote itself down, and sat on whatever step it had reached — so a buyer who had just said
+    they were done was left with an open call and nothing confirmed.
+    """
+
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "thanks, that's all for now",
+            "thanks for your time",
+            "we're done",
+            "that's everything",
+            "goodbye",
+            "I have to go",
+            "let's wrap it there",
+            "nothing else",
+        ],
+    )
+    def test_a_goodbye_is_heard_as_one(self, said: str):
+        assert detect_intent(said) is Step.WRAP, said
+
+    @pytest.mark.parametrize(
+        ("said", "step"),
+        [
+            ("thanks, can you book something?", Step.BOOKING),
+            ("thanks! how much does it cost?", Step.QUOTE),
+            ("that looks great, show me more", Step.GUIDE),
+        ],
+    )
+    def test_thanks_in_the_middle_of_a_call_is_not_a_goodbye(self, said: str, step: Step):
+        """"thanks, can you book something?" is the middle of a call, not the end of one."""
+        assert detect_intent(said) is step, said
+
+    async def test_the_close_recites_what_was_agreed_and_ends_the_call(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("how much is it for 40 seats?"))
+        said = spoken(await collect(agenda.respond("thanks, that's all for now")))
+
+        assert "Thanks for your time" in said, said
+        assert "on screen" in said, said
+        assert agenda.closed, "the call did not write itself down"
+
+    async def test_the_close_never_speaks_a_currency_symbol(self):
+        """`Quote.money` is the screen form and starts with a "$", which a synthesiser reads as
+        the word "dollar" placed in front of the digits."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("how much is it for 40 seats?"))
+        said = spoken(await collect(agenda.respond("that's all, thanks")))
+        assert not set(said) & set("$£€"), said
+
+    async def test_a_call_with_nothing_agreed_says_so_rather_than_implying_otherwise(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        said = spoken(await collect(agenda.respond("goodbye")))
+        assert "Thanks for your time" in said, said
+        assert "short note" in said, said
+        assert agenda.closed
+
+
+class TestAnsweringIsNotAsking:
+    """A tour stop's trigger words are nouns from the tenant's own product, and a buyer says
+    those nouns for two different reasons. Tessera's capacity stop answers to "h100" — so
+    "we're training a 70B model, about 32 H100s for a month", which is the ANSWER to the
+    discovery question, drove the call straight to a web page instead of being heard.
+    """
+
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "we're training a 70B model, about 32 H100s for a month",
+            "we need about 32 H100s",
+            "our budget is around 80k",
+        ],
+    )
+    def test_a_statement_about_their_own_needs_is_not_a_request(self, said: str):
+        from rainmaker.calls.agenda import _is_asking
+
+        assert not _is_asking(said), said
+
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "do you have h100s",
+            "what have you got available right now",
+            "h100s?",
+            "can i see the pricing",
+            "show me the capacity page",
+            "any A100s in eu-west?",
+        ],
+    )
+    def test_a_request_still_reads_as_one(self, said: str):
+        from rainmaker.calls.agenda import _is_asking
+
+        assert _is_asking(said), said
+
+    async def test_the_quantity_is_still_read_off_an_answer_that_does_not_move_the_call(self):
+        """The answer must not be lost just because it does not change the step."""
+        agenda, _ = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("we've got about 40 reps"))
+        assert agenda.said_seats == 40

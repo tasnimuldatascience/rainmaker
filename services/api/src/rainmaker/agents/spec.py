@@ -402,6 +402,18 @@ class AgentSpec:
     #: applies on their behalf.
     annual_discount_pct: int = 0
 
+    #: What a BUYER calls the thing, which is not always what the price list calls it.
+    #:
+    #: THE UNIT AND THE NOUN ARE DIFFERENT WORDS. Tessera's unit is the "GPU-hour" and no buyer
+    #: has ever said it: they say "32 H100s", "a couple of nodes", "sixteen cards". The quantity
+    #: detector listened only for the unit name, so "what does it cost for 32 H100s for a month"
+    #: matched nothing and fell through to a guessed size band — and the agent said thirty six
+    #: dollars a month for eighty-four thousand dollars of compute, out loud, with confidence.
+    #:
+    #: A per-seat tenant needs nothing here: "seats", "users" and "people" are built in. This is
+    #: for a tenant whose product has a name of its own.
+    unit_nouns: tuple[str, ...] = ()
+
     #: What the front door asks for before the call starts.
     #:
     #: A B2B AGENT AND A DENTIST DO NOT ASK THE SAME QUESTIONS. Nadia needs a work address —
@@ -561,6 +573,7 @@ class AgentSpec:
             "pricing_period": self.pricing_period,
             "currency": self.currency,
             "annual_discount_pct": self.annual_discount_pct,
+            "unit_nouns": list(self.unit_nouns),
             "tour": [
                 {
                     "url": t.url, "label": t.label, "shows": t.shows,
@@ -626,6 +639,7 @@ class AgentSpec:
                 for t in raw.get("pricing", [])
             ),
             pricing_period=raw.get("pricing_period", "month"),
+            unit_nouns=tuple(raw.get("unit_nouns", ())),
             currency=raw.get("currency", "usd"),
             annual_discount_pct=int(raw.get("annual_discount_pct", 0)),
             tour=tuple(
