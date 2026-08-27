@@ -680,3 +680,35 @@ class TestTheVoiceNeverClips:
         available = set(Kokoro(str(KOKORO_MODEL), str(KOKORO_VOICES)).get_voices())
         offered = {name for name, _ in KokoroTextToSpeech.VOICES.values()}
         assert offered <= available, offered - available
+
+
+class TestSheNeverDoesTheArithmetic:
+    """Every number on a call is computed by the platform and handed over already said. The
+    model working one out produced "roughly 75,000 GPU-hours" for a figure that is 23,360 —
+    thirty seconds before the real quote said so, which leaves the buyer holding two numbers
+    from the same agent and no way to tell which one to believe.
+
+    Told instead to defer, it reached for "approximately the figure on your screen" during
+    DISCOVERY, when there is no figure on any screen yet and no quote has happened. Both are
+    rules now: no arithmetic anywhere, and no price talk at all before the quote step.
+    """
+
+    def test_the_rules_forbid_working_a_number_out(self):
+        from rainmaker.calls.session import CALL_RULES
+
+        assert "NEVER DO ARITHMETIC" in CALL_RULES
+        assert "75,000" in CALL_RULES, "the observed failure is the reason; keep it"
+
+    def test_discovery_may_not_mention_price_or_ask_for_a_commitment(self):
+        from rainmaker.calls.agenda import PLAN, Step
+
+        objective = PLAN[Step.DISCOVERY].objective
+        assert "do not mention price" in objective
+        assert "do not ask them to commit" in objective
+        assert "do not refer to one" in objective, "nothing is on screen during discovery"
+
+    def test_the_rules_forbid_speaking_for_the_buyer(self):
+        from rainmaker.calls.session import CALL_RULES
+
+        assert "YOU ARE THE SELLER" in CALL_RULES
+        assert "NEVER STATE A NUMBER OR A FACT ABOUT THEIR BUSINESS" in CALL_RULES

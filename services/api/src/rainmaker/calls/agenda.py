@@ -442,8 +442,11 @@ PLAN: dict[Step, StepPlan] = {
     Step.DISCOVERY: StepPlan(
         objective=(
             "Find out how much of what you sell they would actually need, and what is getting "
-            "in the way today. One question at a time. Never ask them to explain their own "
-            "business back to you. Do not describe the product yet."
+            "in the way today. Ask ONE question and stop. Never ask them to explain their own "
+            "business back to you. Do not describe the product yet, do not mention price, cost "
+            "or any figure, and do not ask them to commit to anything — the quote is a later "
+            "step and it has not happened. There is nothing on their screen yet, so do not "
+            "refer to one."
         ),
         max_turns=3,
         next_step=Step.GUIDE,
