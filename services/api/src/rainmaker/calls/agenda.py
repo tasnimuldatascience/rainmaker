@@ -429,9 +429,12 @@ class StepPlan:
 
 PLAN: dict[Step, StepPlan] = {
     Step.OPENING: StepPlan(
+        # THE MODEL NEVER SPEAKS IN THIS STEP ANY MORE — `_open` says the whole opening from
+        # the tenant's own words. The objective is kept because a spec may override it and
+        # because the step still frames the prompt if a tenant re-enables a model greeting.
         objective=(
-            "Greet them by name if you know it, name one specific thing you found on their "
-            "site, and ask what prompted them to look at this. Do not pitch yet."
+            "Greet them by name if you know it, say what you think their situation is, and ask "
+            "the one question that checks it. Do not pitch yet."
         ),
         max_turns=1,
         next_step=Step.DISCOVERY,
@@ -613,6 +616,16 @@ class Agenda:
         async for event in self._enter(Step.OPENING):
             yield event
 
+        # AND STRAIGHT INTO DISCOVERY, WITHOUT SAYING ANYTHING ELSE. The opening now ENDS with
+        # the tenant's discovery question, so the buyer's next sentence is a discovery answer.
+        # Left in OPENING, that answer was handled under the opening's objective and then the
+        # step ran out of budget, and arriving at DISCOVERY spoke again — so one sentence from
+        # the buyer produced a reaction and then a fresh question, which is how she ended up
+        # saying "that's quite a lot!" and then asking what they were training. Two turns, one
+        # of them filler, on the most important answer of the call.
+        self._hand_over(Step.DISCOVERY)
+        yield Phase(Step.DISCOVERY, "listening")
+
         # Anything they typed over the introduction, now that it is safe to answer. The flag is
         # set with no `await` between it and the loop's final check, so nothing can be appended
         # into the gap and stranded.
@@ -790,6 +803,17 @@ class Agenda:
         elif self.turns_in_step >= plan.max_turns and plan.next_step:
             async for event in self._enter(plan.next_step):
                 yield event
+
+    def _hand_over(self, step: Step) -> None:
+        """Move to a step without speaking on arrival.
+
+        `_enter` always says something, which is right when a step has something to announce —
+        a page, a price, a set of times. It is wrong when the previous step has already asked
+        the question this one exists to hear the answer to.
+        """
+        self.step = step
+        self.turns_in_step = 0
+        self._retarget(step)
 
     # ── moving between steps ────────────────────────────────────────────
     async def _enter(self, step: Step, *, said: str = "") -> AsyncIterator[AgendaEvent]:

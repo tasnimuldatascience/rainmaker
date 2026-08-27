@@ -383,8 +383,10 @@ class TestOpeningTheCall:
     async def test_a_site_that_will_not_load_does_not_end_the_call(self):
         agenda, _ = build(**{"research.research_company": RuntimeError("dns")})
         events = await collect(agenda.begin())
-        assert agenda.step is Step.OPENING
+        # Research failed, she still opened, and the call is listening rather than stalled.
+        assert agenda.step is Step.DISCOVERY
         assert panels(events, "note")
+        assert agenda.opened
 
 
 class TestShowingThemTheProduct:
@@ -715,7 +717,9 @@ class TestTheCallCannotStall:
         is a demo that failed."""
         agenda, _ = build()
         await collect(agenda.begin())
-        assert agenda.step is Step.OPENING
+        # The opening ends with the tenant's discovery question, so the call is already
+        # listening for the answer by the time she stops talking. See `_hand_over`.
+        assert agenda.step is Step.DISCOVERY
 
         for _ in range(6):
             await collect(agenda.respond("we handle it by hand at the moment"))
