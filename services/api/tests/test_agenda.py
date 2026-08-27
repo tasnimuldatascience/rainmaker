@@ -422,14 +422,26 @@ class TestShowingThemTheProduct:
         stops = {stop.url for stop in nadia_spec().tour}
         assert set(self.tour_pages(tools)) <= stops
 
-    async def test_the_model_is_told_what_is_on_the_screen(self):
-        """Given only a URL it would describe a page it has not seen, and the narration would
-        drift from the picture the prospect is looking at."""
+    async def test_what_is_on_the_screen_is_stated_rather_than_inferred(self):
+        """THE MODEL IS NO LONGER SHOWN THE PAGE, and that is the point. Given the page text it
+        described it and got it wrong every time the wording changed — at 700 characters it
+        narrated a demo customer's product as ours; cut to 240 it still read numbers off it and
+        invented the rest ("392 GPUs for free, with a reservation period of a week", from a page
+        that says 392 are available and nothing about a week).
+
+        It cannot misread a page it has not been given, and it does not need one: what is on
+        screen is said in the tenant's own words in the sentence immediately before."""
         agenda, _ = build()
         await collect(agenda.begin())
         llm = agenda.session.pipeline.llm
-        await collect(agenda.respond("show me what it looks like"))
-        assert any("49 dollars" in prompt for prompt in llm.calls)
+        said = spoken(await collect(agenda.respond("show me what it looks like")))
+
+        stop = nadia_spec().tour[0]
+        assert f"What you're looking at is {stop.shows}." in said, said
+
+        narration = [p for p in llm.calls if "screen-sharing" in p][0]
+        assert "49 dollars" not in narration, narration
+        assert "the page reads" not in narration, narration
 
     async def test_asking_for_more_moves_the_tour_on(self):
         """A step that only runs on arrival answers "show me another" by talking about the page
@@ -537,14 +549,21 @@ class TestTheNumberIsComputedNotGenerated:
         quote = panels(events, "quote")[0].data
         assert quote["spoken"] in spoken(events)
 
-    async def test_the_model_is_told_the_figure_is_already_said(self):
+    async def test_the_model_is_not_asked_to_follow_a_quote_at_all(self):
+        """IT ANSWERED AS THE BUYER. Told "ask in one sentence whether that works for them", the
+        model produced "That works perfectly, thank you." — accepting its own quote on the
+        seller's behalf, out loud, one sentence after the number.
+
+        There is exactly one sentence that belongs after a price and it never varies, so the
+        model is no longer consulted about it."""
         agenda, _ = build()
         await collect(agenda.begin())
         llm = agenda.session.pipeline.llm
         before = len(llm.calls)
-        await collect(agenda.respond("how much does it cost?"))
-        asked = " ".join(llm.calls[before:])
-        assert "do not repeat the figure" in asked.lower()
+        said = spoken(await collect(agenda.respond("how much does it cost?")))
+
+        assert "How does that sit against what you had in mind?" in said, said
+        assert not llm.calls[before:], llm.calls[before:]
 
     async def test_pricing_with_no_amounts_shows_the_tiers_and_quotes_nothing(self):
         """"Enterprise, quoted" is a legitimate answer. There is nothing to compute, so nothing
@@ -850,16 +869,17 @@ class TestWhoseWebsiteItIs:
         assert "do NOT describe it again" in prompt, prompt
         assert "do NOT describe Corvus Data" in prompt, prompt
 
-    async def test_the_page_excerpt_is_reference_and_cannot_become_the_subject(self):
-        """At 700 characters the excerpt stopped being context and became the subject: given
-        most of a page of somebody else's GPU pricing, the model described GPU pricing."""
+    async def test_no_page_text_reaches_the_narration_prompt_at_all(self):
+        """Trimming the excerpt was tried twice and failed twice. The only size that cannot be
+        misread is none."""
         agenda, _ = build()
         await collect(agenda.begin())
         await collect(agenda.respond("show me what it looks like"))
 
         prompt = [p for p in agenda.session.pipeline.llm.calls if "screen-sharing" in p][0]
-        reference = prompt.split("the page reads:", 1)[1]
-        assert len(reference.strip().rstrip(")")) <= 240, len(reference)
+        assert "the page reads" not in prompt, prompt
+        assert "reference only" not in prompt, prompt
+        assert "do NOT quote any number" in prompt, prompt
 
 
 class TestTheAudienceNeverHearsTheStageDirections:
@@ -1265,3 +1285,133 @@ class TestAnsweringIsNotAsking:
         await collect(agenda.begin())
         await collect(agenda.respond("we've got about 40 reps"))
         assert agenda.said_seats == 40
+
+
+class TestAcceptingATimeOutLoud:
+    """`confirm_slot` was reachable only by CLICKING a slot in the console.
+
+    On a voice call the agent offered two real times, the buyer said "the first one works for
+    me", and nothing happened — the model improvised "our team will confirm the booking for
+    you", which is a promise nobody wrote down and no diary holds. The entire escalation path
+    ended in a sentence.
+    """
+
+    @staticmethod
+    def two_slots() -> list[dict[str, str]]:
+        from datetime import UTC, datetime, timedelta
+
+        base = datetime(2026, 8, 27, 14, 0, tzinfo=UTC)
+        return [
+            {"starts_at": base.isoformat()},
+            {"starts_at": (base + timedelta(minutes=30)).isoformat()},
+        ]
+
+    @pytest.mark.parametrize(
+        ("said", "index"),
+        [
+            ("the first one", 0),
+            ("first one works", 0),
+            ("the earlier one", 0),
+            ("the second one please", 1),
+            ("the later one", 1),
+            ("Thursday at two works for me", 0),
+            ("can we do two thirty", 1),
+            ("two thirty is better", 1),
+        ],
+    )
+    def test_a_time_they_named_is_the_time_that_gets_booked(self, said: str, index: int):
+        from rainmaker.calls.agenda import pick_slot
+
+        assert pick_slot(said, self.two_slots()) == index, said
+
+    @pytest.mark.parametrize(
+        "said",
+        ["actually how much is it again?", "what about the interconnect?", "yes"],
+    )
+    def test_anything_that_is_not_an_acceptance_books_nothing(self, said: str):
+        from rainmaker.calls.agenda import pick_slot
+
+        assert pick_slot(said, self.two_slots()) is None, said
+
+    def test_a_bare_yes_books_the_only_time_on_the_table(self):
+        from rainmaker.calls.agenda import pick_slot
+
+        assert pick_slot("yes, that works", self.two_slots()[:1]) == 0
+
+    def test_naming_only_the_day_asks_which_rather_than_guessing(self):
+        """Two slots half an hour apart are both "Thursday". Booking the wrong half of somebody's
+        afternoon is the one failure a diary cannot quietly absorb."""
+        from rainmaker.calls.agenda import AMBIGUOUS, pick_slot
+
+        assert pick_slot("Thursday works for me", self.two_slots()) == AMBIGUOUS
+
+    async def test_saying_yes_to_a_time_actually_books_it(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("can I talk to someone?"))
+        assert agenda.offered, "no times were offered"
+
+        said = spoken(await collect(agenda.respond("the first one works for me")))
+        assert agenda.booking is not None, "nothing was booked"
+        assert agenda.booking["spoken"] in said, said
+
+    async def test_an_ambiguous_time_produces_a_question_not_a_booking(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        await collect(agenda.respond("can I talk to someone?"))
+        day = __import__("datetime").datetime.fromisoformat(
+            agenda.offered[0]["starts_at"]
+        ).strftime("%A")
+
+        said = spoken(await collect(agenda.respond(f"{day} works for me")))
+        assert agenda.booking is None, "it guessed"
+        assert said.rstrip().endswith("?"), said
+
+
+class TestTheComparisonIsTheTenantsWords:
+    """A comparison table a language model wrote about a named competitor is a defamation risk
+    with a grid layout — and one that will not actually compare loses the deal on the one
+    question where the buyer has said out loud what they need convincing of.
+
+    Handed the table and told to be fair, the model answered "how does this compare to AWS?"
+    with "it seems you're already well equipped for what you need": it compared nothing, conceded
+    the deal, and said something that is not in the table anywhere.
+    """
+
+    async def test_the_rival_they_named_is_the_one_answered(self):
+        """Substring matching needed the tenant's exact phrase, so "why not just buy our own
+        boxes?" missed "buying your own boxes" on a single letter."""
+        from dataclasses import replace
+
+        from rainmaker.agents.spec import Competitor
+
+        spec = replace(
+            nadia_spec(),
+            competitors=(
+                Competitor(name="a hyperscaler", positioning="one account",
+                           against=(("waiting", "give you nodes today"),)),
+                Competitor(name="buying your own boxes", positioning="the cheapest hour",
+                           against=(("time to start", "have you training this afternoon"),)),
+            ),
+        )
+        agenda, _ = build(spec=spec)
+        await collect(agenda.begin())
+        said = spoken(await collect(agenda.respond("why not just buy our own boxes?")))
+        assert "buying your own boxes" in said, said
+        assert "a hyperscaler" not in said, said
+
+    async def test_it_says_what_the_rival_is_good_at_before_the_difference(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        said = spoken(await collect(agenda.respond("how do you compare to a chat widget?")))
+        assert "The honest case for" in said, said
+        assert "Where we differ:" in said, said
+        assert said.index("The honest case for") < said.index("Where we differ:")
+
+    async def test_the_model_is_never_asked_to_write_a_comparison(self):
+        agenda, _ = build()
+        await collect(agenda.begin())
+        llm = agenda.session.pipeline.llm
+        before = len(llm.calls)
+        await collect(agenda.respond("how do you compare to a chat widget?"))
+        assert not llm.calls[before:], llm.calls[before:]

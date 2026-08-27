@@ -296,12 +296,24 @@ def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | Non
     """
     import re
 
-    words = {
+    # TENS AND UNITS SEPARATELY, BECAUSE "THIRTY TWO" IS TWO WORDS. A flat table of number
+    # words matched the longest single one it could find, so a buyer saying "we need about
+    # thirty two H100s" out loud was quoted for THIRTY — a 6% error nobody would catch by ear,
+    # on a figure of eighty-four thousand dollars. Digits never had this problem, which is why
+    # it survived: it only appears when somebody speaks the number instead of typing it.
+    ones = {
         "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-        "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15,
-        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "eighty": 80,
-        "hundred": 100,
+        "eight": 8, "nine": 9,
     }
+    teens = {
+        "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+        "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+    }
+    tens = {
+        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+        "eighty": 80, "ninety": 90,
+    }
+    words = {**ones, **teens, **tens, "hundred": 100}
     tenant_words = "|".join(
         re.escape(word) + "s?" for word in dict.fromkeys(u.lower() for u in units if u)
     )
@@ -312,7 +324,15 @@ def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | Non
     # nothing and the quote fell back to a guessed size band.
     nouns = r"(?:seats?|licen[cs]es?|users?|reps?|people|staff|salespeople|agents?|of us"
     nouns += (f"|{tenant_words})" if tenant_words else ")")
-    number = r"(?P<n>\d{1,3}(?:,\d{3})+|\d{1,7}|" + "|".join(words) + r")"
+    # Longest first inside each group, and compounds before their own tens word, so "thirty two"
+    # is never truncated to "thirty" by an earlier alternative winning.
+    compound = "|".join(
+        f"{ten}[- ]{one}" for ten in tens for one in ones
+    )
+    singles = "|".join(sorted(words, key=len, reverse=True))
+    number = (
+        r"(?P<n>\d{1,3}(?:,\d{3})+|\d{1,7}|" + compound + "|" + singles + r")"
+    )
     # "for" earns its place: "how much for 40 people" is one of the two commonest ways the
     # question is asked, and without it the quote silently falls back to the research band's
     # guess on a sentence that stated the number out loud.
@@ -333,8 +353,17 @@ def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | Non
     match = next((found for found in (p.search(text) for p in patterns) if found), None)
     if not match:
         return None
-    raw = match.group("n").lower()
-    seats = words.get(raw) if raw in words else int(raw.replace(",", ""))
+    raw = match.group("n").lower().replace("-", " ").strip()
+    if raw in words:
+        seats: int | None = words[raw]
+    elif " " in raw:
+        parts = raw.split()
+        seats = sum(words.get(part, 0) for part in parts) if all(p in words for p in parts) else None
+    else:
+        try:
+            seats = int(raw.replace(",", ""))
+        except ValueError:
+            seats = None
     if seats is None or not 1 <= seats <= MAX_SEATS:
         return None
     return seats

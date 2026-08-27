@@ -30,6 +30,7 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -239,6 +240,112 @@ _ASKING = re.compile(
 )
 
 
+#: `pick_slot` heard a time, and more than one of the offered slots answers to it.
+AMBIGUOUS = -1
+
+#: Picking one of two offered times, by position rather than by clock.
+_ORDINAL_SLOT = re.compile(
+    r"\b(?:the\s+)?(?:(first|1st|earlier|early|sooner)|(second|2nd|later|latter|last))\b"
+    r"(?:\s+(?:one|slot|time|option))?",
+    re.IGNORECASE,
+)
+
+#: A plain yes. Only ever consulted when a time is actually on the table.
+_ACCEPTS = re.compile(
+    r"\b(?:yes|yeah|yep|yup|sure|ok(?:ay)?|sounds? (?:good|great|fine|perfect)"
+    r"|that works|works for me|perfect|great|lovely|book it|let'?s do (?:it|that)"
+    r"|i'?ll take (?:it|that)|go ahead)\b",
+    re.IGNORECASE,
+)
+
+#: Hours as a buyer says them back. "noon" and "midday" are twelve; "half past" is a minute cue.
+_HOUR_WORDS_BY_VALUE = {
+    1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight",
+    9: "nine", 10: "ten", 11: "eleven", 12: "twelve",
+}
+
+_HOUR_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+    "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "noon": 12, "midday": 12,
+}
+
+
+def pick_slot(text: str, offered: list[dict[str, Any]]) -> int | None:
+    """Which offered time they just accepted.
+
+    Returns the index, `AMBIGUOUS` when they named a time that fits more than one of them, or
+    `None` when they were not accepting anything at all. Three answers because they need three
+    different responses: book it, ask which, or carry on with the call.
+
+    THE CONSOLE COULD BOOK AND A VOICE CALL COULD NOT. `confirm_slot` was reachable only by
+    clicking a slot in the browser, so on a call the agent offered two real times, the buyer
+    said "Thursday at twelve works for me", and nothing happened — the model improvised "our
+    team will confirm the booking for you", which is a promise nobody wrote down and no diary
+    holds. The whole escalation path ended in a sentence.
+
+    Deliberately conservative, in the same way the seat detector is. It fires on an ordinal
+    ("the first one"), on a clock reference that matches an offered time, or on a bare yes when
+    a time is on the table. It stays quiet on anything else, because booking the wrong half of
+    somebody's Thursday is worse than asking again.
+    """
+    if not offered:
+        return None
+
+    ordinal = _ORDINAL_SLOT.search(text)
+    if ordinal:
+        return 0 if ordinal.group(1) else min(1, len(offered) - 1)
+
+    lowered = text.lower()
+    wants_half = bool(re.search(r"\b(?:thirty|half past|:30)\b", lowered))
+
+    scored: list[tuple[int, int]] = []
+    for index, slot in enumerate(offered):
+        when = datetime.fromisoformat(slot["starts_at"])
+        score = 0
+        if when.strftime("%A").lower() in lowered:
+            score += 2
+        hour12 = when.hour % 12 or 12
+        said_hour = any(
+            word in lowered for word, value in _HOUR_WORDS.items() if value == hour12
+        ) or re.search(rf"\b{hour12}\b", lowered) is not None
+        if said_hour:
+            score += 2
+            # "twelve" against a 12:00 and a 12:30 is ambiguous until you notice which one they
+            # did NOT say. The half-hour cue is the only thing separating them.
+            score += 1 if wants_half == (when.minute == 30) else 0
+        if score:
+            scored.append((score, index))
+
+    if scored:
+        best = max(scored)
+        # A TIE IS A QUESTION, NOT A DECISION. Two slots half an hour apart are both "Thursday",
+        # so "Thursday works for me" narrows it to the day and no further. Booking the wrong
+        # half of somebody's afternoon is the one failure a diary cannot quietly absorb, and
+        # saying nothing is barely better: the model fills the silence with a promise. Asking
+        # which is what a person does, and it takes one sentence.
+        if sum(1 for score, _ in scored if score == best[0]) == 1:
+            return best[1]
+        return AMBIGUOUS
+
+    # No clock reference at all. A bare "yes" is only an answer to the question just asked, and
+    # only when there is exactly one thing it could mean.
+    if len(offered) == 1 and _ACCEPTS.search(text):
+        return 0
+    return None
+
+
+#: Enough stemming to make buy/buying and box/boxes the same word, and no more. A real stemmer
+#: would be a dependency and a wrong answer here is a comparison, not a search result.
+_STEM_SUFFIXES = ("ing", "es", "s")
+
+
+def _stem(word: str) -> str:
+    for suffix in _STEM_SUFFIXES:
+        if len(word) > len(suffix) + 2 and word.endswith(suffix):
+            return word[: -len(suffix)]
+    return word
+
+
 def _is_asking(text: str) -> bool:
     """Whether this reads as a request rather than as a statement of their own situation.
 
@@ -260,10 +367,22 @@ def _opens(text: str) -> str:
     return text[:1].upper() + text[1:] if text else ""
 
 
+#: EVERY ALTERNATIVE IS ANCHORED AT BOTH ENDS, and that is the whole correction. Written as a
+#: prefix match with a bare `and\??` in it, this fired on any sentence beginning with "And" —
+#: so "And what would that cost us?", the question the entire call exists to reach, was
+#: answered as a pushback. The buyer asked for a price and got a reason to care. Observed on a
+#: recorded call, at the moment the quote should have appeared.
+#:
+#: A challenge is a SHORT, COMPLETE utterance. "And?" on its own is one; "And what would that
+#: cost us?" is a question that happens to start with the same word. The difference is whether
+#: anything follows, so the pattern now requires that nothing does.
 _CHALLENGE = re.compile(
-    r"^\s*(?:so what|and\??|ok(?:ay)?[.?!]*$|meh|why (?:should i|would i|do i)"
-    r"|what'?s the point|not interested|we'?re (?:fine|all set)|don'?t need|why does that matter"
-    r"|who cares|and\s+that\s+matters\s+because)",
+    r"^\s*(?:"
+    r"so what|and|ok(?:ay)?|meh|who cares|what'?s the point|not interested"
+    r"|we'?re (?:fine|all set|good)|(?:we )?don'?t need (?:it|this|that)?"
+    r"|why (?:should|would|do) (?:i|we)(?: care)?|why does that matter"
+    r"|and\s+that\s+matters\s+because"
+    r")\s*[.?!]*\s*$",
     re.IGNORECASE,
 )
 
@@ -584,6 +703,23 @@ class Agenda:
         if not text:
             return
         self.transcript_lines.append(f"Prospect: {text}")
+
+        # ACCEPTING A TIME BEATS EVERYTHING ELSE ON THE TABLE. Checked before the intents
+        # because "Thursday at twelve works for me" carries no intent of its own and would
+        # otherwise fall through to an ordinary turn — which is exactly what happened, and the
+        # model answered it with a promise instead of a booking.
+        if self.offered and self.booking is None:
+            picked = pick_slot(text, self.offered)
+            if picked == AMBIGUOUS:
+                # Read back only the part that differs, which is how a person disambiguates a
+                # time: "twelve, or twelve thirty?" rather than the whole phrase twice.
+                async for event in self._say(self._which_slot()):
+                    yield event
+                return
+            if picked is not None:
+                async for event in self.confirm_slot(picked):
+                    yield event
+                return
 
         # NOBODY IS IN THE ROOM, so asking for a person cannot mean a transfer. It means a time
         # with one. The fixed line is still said first and the model is still never consulted
@@ -1047,14 +1183,23 @@ class Agenda:
         async for event in self._say(f"What you're looking at is {stop.shows}."):
             yield event
 
-        excerpt = " ".join((looked.get("text") or "").split())[:240]
+        # NO PAGE TEXT IN THIS PROMPT AT ALL. It was cut from 700 characters to 240 and the
+        # model still read numbers off it and got them wrong — "you're currently getting 392
+        # GPUs for free right now, with a reservation period of a week", from a page that says
+        # 392 GPUs are AVAILABLE and says nothing about a week. It cannot misread a page it has
+        # not been shown, and it does not need one: what is on screen has already been said, in
+        # the tenant's words, in the sentence immediately before this.
+        #
+        # What is left is the only thing the model is being asked for and the only thing it
+        # cannot get factually wrong — the connection between a product and a problem the buyer
+        # described in their own words a moment ago.
+        problem = self.need.means if self.need is not None else ""
+        because = f" They are dealing with this: {problem}." if problem else ""
         async for event in self._speak(
-            f"(You are screen-sharing {ours}'s own product with {theirs}: {stop.label}. You "
-            f"have just told them what is on the screen, so do NOT describe it again and do NOT "
-            f"describe {theirs}. In ONE sentence, say what it would do about the problem they "
-            f"described. Address them as \"you\" — they are on the call, so \"my client\" or "
-            f"\"the customer\" is the wrong person. "
-            f"For reference only, the page reads: {excerpt})"
+            f"(You are screen-sharing {ours}'s own product with {theirs}: {stop.label}. You have "
+            f"just said what is on the screen, so do NOT describe it again, do NOT describe "
+            f"{theirs}, and do NOT quote any number.{because} In ONE sentence, say what this "
+            f"would change for them. Address them as \"you\".)"
         ):
             yield event
 
@@ -1075,9 +1220,22 @@ class Agenda:
                 yield event
             return
 
+        # WHICH RIVAL THEY MEANT, NOT WHICH ONE IS FIRST. Substring matching required the buyer
+        # to say the tenant's exact phrase: "why not just buy our own boxes?" missed
+        # "buying your own boxes" on a single letter, fell through to the default, and got a
+        # fair-and-honest comparison against something they had not mentioned.
+        #
+        # Overlap on content words instead, stemmed just enough that buy/buying and box/boxes
+        # are the same word. No match at all still falls back to the tenant's first rival, which
+        # is the one they chose to lead with.
         lowered = said.lower()
-        named = [r for r in rivals if r.name.lower() in lowered]
-        shown = named or rivals
+        heard = {_stem(word) for word in re.findall(r"[a-z]{3,}", lowered)}
+        scored = [
+            (len(heard & {_stem(w) for w in re.findall(r"[a-z]{3,}", r.name.lower())}), i, r)
+            for i, r in enumerate(rivals)
+        ]
+        best = max(scored)
+        shown = [best[2]] if best[0] else list(rivals)
 
         yield Panel(
             "comparison",
@@ -1093,16 +1251,27 @@ class Agenda:
                 ],
             },
         )
-        table = " | ".join(
-            f"{r.name}: they are good at {r.positioning}; "
-            + "; ".join(f"on {d} we {o}" for d, o in r.against)
-            for r in shown
-        )
-        async for event in self._speak(
-            f"(The comparison is on their screen: {table} "
-            f"Be fair about what they are good at first, then say plainly where you differ. "
-            f"Never rubbish them, and never claim anything not in that table.)"
-        ):
+        # SPOKEN, NOT SUMMARISED. Handed the table and told to "be fair, then say where you
+        # differ", the model answered "how does this compare to AWS?" with "it seems you're
+        # already well equipped for what you need" — a sentence that compares nothing, concedes
+        # the deal, and is not in the table anywhere.
+        #
+        # That is the expensive failure mode here twice over. Every clause about a named
+        # competitor is a factual claim the tenant is answerable for, which is why this
+        # docstring already calls a model-written comparison a defamation risk with a grid
+        # layout — and a model that will not actually compare loses the deal on the one question
+        # where the buyer has said out loud what they need convincing of.
+        #
+        # The tenant wrote both halves: what the competitor is genuinely good at, and where the
+        # difference is. Said in that order, it IS the answer.
+        # "The honest case for X" rather than "X is/are good at": a rival's name is whatever the
+        # tenant typed — "a hyperscaler", "buying your own boxes", "a chat widget" — and no verb
+        # agrees with all of them. The first attempt said "A chat widget are genuinely good at".
+        # A phrasing with no verb to agree cannot be wrong about one.
+        rival = shown[0]
+        fair = f"The honest case for {rival.name}: {rival.positioning}."
+        differences = " ".join(f"On {d}, we {o}." for d, o in rival.against)
+        async for event in self._say(f"{fair} Where we differ: {differences}"):
             yield event
 
     async def _quote(self, said: str) -> AsyncIterator[AgendaEvent]:
@@ -1154,10 +1323,12 @@ class Agenda:
         yield Panel("quote", quote.as_dict())
         async for event in self._say(quote.spoken()):
             yield event
-        async for event in self._speak(
-            "(Their quote is on screen and you have just read it out. Do NOT repeat the figure. "
-            "Ask in one sentence whether that works for them.)"
-        ):
+        # ASKED FOR ONE PREDICTABLE SENTENCE, IT ANSWERED AS THE BUYER. Told "ask whether that
+        # works for them", the model produced "That works perfectly, thank you." — accepting its
+        # own quote, on the seller's behalf, out loud. There is exactly one sentence that
+        # belongs after a number, it never varies, and it is the last one before the buyer
+        # either objects or moves; nothing about it wants improvising.
+        async for event in self._say("How does that sit against what you had in mind?"):
             yield event
 
     async def _close(self, said: str) -> AsyncIterator[AgendaEvent]:
@@ -1261,6 +1432,21 @@ class Agenda:
         spoken = " or ".join(slot["spoken"] for slot in self.offered[:2])
         async for event in self._say(f"I could do {spoken}. Would either of those work?"):
             yield event
+
+    def _which_slot(self) -> str:
+        """"Twelve, or twelve thirty?" — the smallest question that separates the offers.
+
+        Built from the times rather than asked of the model, for the same reason the offer was:
+        a model that re-words a slot has offered a slot nobody holds.
+        """
+        times = []
+        for slot in self.offered[:2]:
+            when = datetime.fromisoformat(slot["starts_at"])
+            hour = _HOUR_WORDS_BY_VALUE[when.hour % 12 or 12]
+            times.append(f"{hour} thirty" if when.minute == 30 else hour)
+        if len(times) < 2 or times[0] == times[1]:
+            return "Which of those works better for you?"
+        return f"{_opens(times[0])}, or {times[1]}?"
 
     async def confirm_slot(self, index: int) -> AsyncIterator[AgendaEvent]:
         """Book one of the offered slots. Called when the prospect picks one."""

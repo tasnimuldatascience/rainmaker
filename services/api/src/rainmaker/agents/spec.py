@@ -309,6 +309,12 @@ class Competitor:
     name: str
     positioning: str
     #: (dimension, what is true of us), shown beside `positioning`.
+    #:
+    #: THE SECOND HALF COMPLETES "ON <dimension>, WE ___", because that is how it is both shown
+    #: and said. Written to complete some other sentence it comes out as "on egress, we not
+    #: charge you" — which was in the demo tenant's own data until the comparison started being
+    #: spoken aloud instead of summarised by a model, at which point the model had stopped
+    #: quietly repairing the grammar and the tenant's actual words were heard.
     against: tuple[tuple[str, str], ...] = ()
 
 

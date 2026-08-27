@@ -215,7 +215,7 @@ def tessera() -> AgentSpec:
                 against=(
                     ("waiting", "give you nodes today rather than a quota request in a queue"),
                     ("price", "cost about half per GPU-hour at the reserved rate"),
-                    ("egress", "not charge you to get your own weights back out"),
+                    ("egress", "do not charge you to get your own weights back out"),
                 ),
             ),
             Competitor(
@@ -225,7 +225,7 @@ def tessera() -> AgentSpec:
                     "them"
                 ),
                 against=(
-                    ("time to start", "be training this afternoon rather than next quarter"),
+                    ("time to start", "have you training this afternoon rather than next quarter"),
                     ("bursts", "let you take 64 nodes for a week and give them back"),
                     ("who fixes it", "replace a failed card without it being your problem"),
                 ),
