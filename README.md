@@ -31,9 +31,10 @@ checkout in front of you. If the deal genuinely needs a person, it books one out
 calendar. **Nobody is waiting in a queue behind it, because there is nobody behind it.**
 
 **That call is also the product.** Rainmaker sells the agent to other businesses, who configure
-their own and put it on their own website. The console opens on a customer's rather than on ours
-— theirs sells GPUs by the hour, with a rate card, a competitor and a site to walk you round;
-ours would be selling you the thing you are already looking at.
+their own and put it on their own website — so the console opens on Nadia, who sells the agent
+itself, and a buyer asking her how it works is watching it work. One command publishes a second
+tenant with nothing in common with us — GPUs by the hour, a rate card, a competitor and a site
+to walk you round — and the same ten steps run on both.
 
 | Part | What it does |
 |---|---|
@@ -91,6 +92,15 @@ npm run dev            # http://localhost:5173
 
 Open it, give her a work email, and talk. **That is the demo** — everything in the table above
 happens on that call, with no key, no account and nothing paid for.
+
+```bash
+python scripts/demo-embed.py    # optional: publish a second tenant, and put their agent on
+                                # their own website at /demo/tessera.html
+```
+
+That one is a GPU cloud. Same code, same ten steps, none of our vocabulary: it quotes GPU-hours
+because their rate card is in GPU-hours, and it hears "thirty two H100s for a month" as a
+quantity and a duration because they wrote down what their buyers call the thing.
 
 ### Giving her the local brain and voice
 
@@ -296,13 +306,30 @@ closed the tab**, which is most of them.
 
 ### The graph decides, the model writes
 
-The step the call is on, which tool fires, and every sentence where being wrong costs something —
-the disclosure, the times offered, the booking confirmation, the handoff — are all decided in
-code. The model writes the greeting, the questions, and the narration.
+The step the call is on, which tool fires, and every sentence where being wrong costs something
+are decided in code. The model writes the discovery questions, the objection handling, and the
+one sentence that ties a page on screen to the problem this buyer just described.
 
 That split is the whole design. A model that phrases a question awkwardly costs a moment. A model
 that decides on its own to confirm a meeting books nothing and promises everything, and
 Qwen2.5-1.5B is nowhere near reliable enough to be trusted with the difference.
+
+**The line has moved, and it moved by evidence.** Every sentence below started out as the
+model's and was taken away from it after a recorded call showed what it did with it:
+
+| Now fixed text | What the model did with it |
+|---|---|
+| The opening | Read four job titles off a careers page back to the person who wrote them |
+| What is on screen during the tour | Narrated a demo customer's product as ours; invented "392 GPUs for free" |
+| The quote | — never had it; the arithmetic has always been the platform's |
+| The sentence after the quote | "That works perfectly, thank you" — accepted its own quote, as the buyer |
+| The comparison | Answered "how do you compare to AWS?" with "you're already well equipped" |
+| The close | "Great! Let me know if you need anything else" — to somebody who had just left |
+
+None of those were fixed by a better prompt, and three of them survived two attempts at one.
+The pattern underneath is that a sentence carrying a commitment — a number, a time, a claim
+about a named competitor, what is on a screen — is a sentence the tenant should own; a 1.5B
+model is a good writer and a bad witness.
 
 Two things she will not do, both enforced rather than requested:
 
@@ -460,9 +487,11 @@ and a tag manager, and because microphone permission should be scoped to us rath
 ```python
 AgentSpec(
     tenant="tessera", agent_id="alex",
-    name="Alex", company="Tessera Compute", voice="male-warm",
+    name="Mara", company="Tessera Compute", voice="female-warm",
     knowledge=(Fact("H100s by the hour, in clusters of up to 64…", source="positioning"),),
     pricing=(Tier("Reserved", "$2.40 / GPU-hour", unit_amount=240, unit_name="GPU-hour"),),
+    unit_nouns=("GPU", "H100", "A100", "card", …),       # what a BUYER calls it, not the price list
+    needs=(Need(signals=("pytorch", "training"), means=…, opener=…, ask=…),),
     competitors=(Competitor(name="a hyperscaler", …),),
     tools=("calendar", "crm", "research", "payments"),   # no email server: not granted, not reachable
     guardrails=Guardrails(disclosure="Quick thing first — I'm an AI, not a person…"),
@@ -471,9 +500,12 @@ AgentSpec(
 
 That agent runs all ten steps of the call on a business nothing like ours — hours instead of
 seats, engineers instead of sales teams — which is a stronger claim than a second SaaS company
-with our shape and a different logo. It is also where the research step earns its keep: their
-buyer is identifiable from a careers page, so "I saw you're hiring two ML engineers" is a real
-buying signal for compute rather than a party trick.
+with our shape and a different logo. It is also where the research step earns its keep, though not
+by reading the careers page back: a company hiring ML engineers is a company that will run out
+of compute, so what she opens with is the conclusion — "it looks like you are building something
+new, and new work tends to run into compute long before anybody has budgeted for it" — and the
+one question that checks it. Reciting the finding is what she used to do, and it is the reason
+`Need` exists.
 
 Versions are immutable and publishing is a pointer move, so rolling back a bad change is one
 call and a publish cannot alter an agent underneath somebody mid-conversation with it.
