@@ -340,23 +340,41 @@ def _minutes_words(minute: int) -> str:
     return f" {_TEENS_AND_TENS[tens * 10]} {_ONES[ones]}"
 
 
-def _spoken(when: datetime) -> str:
-    """A timestamp as a person would say it, in words.
+def _spoken(when: datetime, *, now: datetime | None = None) -> str:
+    """A time as a person offering it would actually say it.
 
     Formatted here rather than in the agent because the model is the least reliable place to put
     a fact. Asked to read "2026-08-27T14:30:00+00:00" aloud, a small model will cheerfully say
     the wrong day, and a wrong time in a confirmed booking is a missed meeting. Handing it a
     finished phrase removes the opportunity.
 
-    "UTC" is spelled out as three letters rather than said as a word, because a synthesiser will
-    otherwise attempt to pronounce it.
+    IT USED TO SAY "FRIDAY THE TWENTY-EIGHTH AT TEN IN THE MORNING, U T C", which is correct,
+    unambiguous, and not a sentence anybody has ever spoken to another person. Three things were
+    wrong with it and all three are about being heard rather than being right:
+
+      the ordinal   Nobody offering a slot four days out says the date. They say the day. The
+                    date belongs on the confirmation, where it is read rather than heard.
+      the timezone  "U T C" spelled into the middle of an offer is the clearest possible sign
+                    that a machine composed the sentence. The exact timestamp is on the screen
+                    and in the confirmation; the offer is a conversation.
+      the distance  A slot tomorrow is "tomorrow". Saying "Friday" for tomorrow makes the
+                    listener do arithmetic to check you.
     """
+    now = now or datetime.now(UTC)
+    days = (when.date() - now.date()).days
+    if days == 0:
+        day = "today"
+    elif days == 1:
+        day = "tomorrow"
+    elif 2 <= days <= 6:
+        day = f"{when:%A}"
+    else:
+        # Far enough out that the weekday alone is ambiguous, so the date comes back.
+        day = f"{when:%A} the {_ordinal_words(when.day)}"
+
     hour_words = _ONES[when.hour % 12]
     part = "in the morning" if when.hour < 12 else "in the afternoon"
-    return (
-        f"{when:%A} the {_ordinal_words(when.day)} "
-        f"at {hour_words}{_minutes_words(when.minute)} {part}, U T C"
-    )
+    return f"{day} at {hour_words}{_minutes_words(when.minute)} {part}"
 
 
 def main() -> None:

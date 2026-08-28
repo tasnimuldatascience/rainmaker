@@ -73,8 +73,16 @@ class TestWhatTheCalendarWillOffer:
         spoken = slot["spoken"]
         assert slot["starts_at"] not in spoken, "the raw timestamp leaked into the spoken form"
         assert not any(char.isdigit() for char in spoken), f"digits survived: {spoken!r}"
-        assert any(day in spoken for day in
-                   ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"))
+
+        # A DAY A PERSON WOULD SAY. "today" and "tomorrow" are the near ones — an offer for
+        # tomorrow that says "Friday" makes the listener do arithmetic to check you.
+        assert any(
+            day in spoken
+            for day in ("today", "tomorrow", "Monday", "Tuesday", "Wednesday", "Thursday",
+                        "Friday", "Saturday", "Sunday")
+        ), f"no day in {spoken!r}"
+        assert "U T C" not in spoken, "a timezone spelled into an offer is a machine talking"
+        assert "the " not in spoken or "at" in spoken, spoken
 
     def test_a_limit_is_respected_because_choice_paralyses(self, calendar):
         assert len(calendar.list_availability(limit=2)["slots"]) == 2
@@ -215,7 +223,7 @@ class TestTheEmailServerIsSafeByDefault:
             contact_name="Dana Whitfield",
             company="Corvus Data",
             summary="We talked about the overlap with your Postgres setup.",
-            meeting_spoken="Wednesday the twenty-sixth at nine in the morning",
+            meeting_spoken="Wednesday at nine in the morning",
         )
         assert "Dana" in draft["body"]
         assert "Wednesday" in draft["body"]

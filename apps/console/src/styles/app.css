@@ -621,10 +621,52 @@
     background: radial-gradient(120% 90% at 50% -20%, var(--surface-3), #05070b 70%);
     border: 1px solid var(--line);
   }
-  .meet[data-side="true"] { grid-template-columns: minmax(0, 1fr) 26rem; }
-  .meet[data-side="true"] .meet-stage { grid-column: 1; }
-  .meet[data-side="true"] .meet-bar { grid-column: 1; }
-  .meet[data-side="true"] .meet-side { grid-column: 2; grid-row: 1 / -1; }
+  /* Stage, then rail. The stage gets everything the rail does not need, and the rail needs
+     about as much as a column of dialogue needs to stay readable. */
+  .meet { grid-template-columns: minmax(0, 1fr) 21rem; }
+  .meet-stage { grid-column: 1; }
+  .meet-bar { grid-column: 1; }
+  .meet-rail { grid-column: 2; grid-row: 1 / -1; }
+
+  /* The instruments open OVER the rail, not beside it. Two panels answering different questions
+     do not both need to be on screen, and side by side they left the product a third of the
+     window. */
+  .meet[data-side="true"] .meet-side {
+    grid-column: 2; grid-row: 1 / -1; z-index: 4;
+  }
+  .meet[data-side="true"] .meet-rail { visibility: hidden; }
+
+  .meet-rail {
+    display: grid; grid-template-rows: auto minmax(0, 1fr);
+    background: var(--surface-1); border-inline-start: 1px solid var(--line);
+    min-block-size: 0;
+  }
+  .rail-face {
+    position: relative; aspect-ratio: 1 / 1; overflow: hidden;
+    border-block-end: 1px solid var(--line); background: var(--surface-2);
+    transition: box-shadow var(--med);
+  }
+  .rail-face[data-speaking="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
+  /* A scrim under the name, or it sits on whatever the face happens to be doing there. */
+  .rail-face::after {
+    content: ""; position: absolute; inset-inline: 0; inset-block-end: 0; block-size: 5.5rem;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.72), transparent);
+    pointer-events: none;
+  }
+  .rail-face .pip-name {
+    position: absolute; z-index: 1;
+    inset-block-end: var(--s-3); inset-inline-start: var(--s-3);
+  }
+
+  .meet-idle {
+    display: grid; place-content: center; justify-items: center; gap: var(--s-2);
+    text-align: center; padding: var(--s-6);
+  }
+  .meet-idle p { max-inline-size: 34ch; }
+  .rail-talk {
+    overflow-y: auto; padding: var(--s-4); display: grid; gap: var(--s-4);
+    align-content: start;
+  }
 
   .meet-stage {
     position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr);
@@ -688,8 +730,7 @@
     line-clamp: 3; overflow: hidden;
   }
   .meet-caption[data-partial] { color: rgb(255 255 255 / 0.62); font-style: italic; }
-  /* Clear of the pip, which is 12rem wide plus its inset. */
-  .meet-stage:has(.meet-self) .meet-caption { inset-inline-end: 13.5rem; margin-inline: 0 auto; }
+  /* Nothing floats over the stage any more, so the caption spans it. */
 
   .meet-toast {
     position: absolute; inset-block-start: var(--s-6); inset-inline: 0; margin-inline: auto;

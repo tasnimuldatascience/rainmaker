@@ -262,12 +262,12 @@ _SLOTS = [
     {
         "starts_at": "2099-01-05T09:00:00+00:00",
         "ends_at": "2099-01-05T09:30:00+00:00",
-        "spoken": "Tuesday the fifth at nine in the morning, U T C",
+        "spoken": "Tuesday at nine in the morning",
     },
     {
         "starts_at": "2099-01-05T09:30:00+00:00",
         "ends_at": "2099-01-05T10:00:00+00:00",
-        "spoken": "Tuesday the fifth at nine thirty in the morning, U T C",
+        "spoken": "Tuesday at nine thirty in the morning",
     },
 ]
 
@@ -466,7 +466,7 @@ class TestTheSentencesTheModelIsNotTrustedWith:
         events = await collect(agenda.respond("can we book something"))
 
         said = spoken(events)
-        assert "Tuesday the fifth at nine in the morning" in said
+        assert "Tuesday at nine in the morning" in said
         assert panels(events, "slots")
 
     async def test_the_offer_never_reaches_the_model(self):
@@ -484,7 +484,7 @@ class TestTheSentencesTheModelIsNotTrustedWith:
 
         booked = tools.named("calendar.book_meeting")
         assert booked and booked[0]["attendee_email"] == "dana.whitfield@corvus.example"
-        assert "Tuesday the fifth at nine in the morning" in spoken(events)
+        assert "Tuesday at nine in the morning" in spoken(events)
         assert panels(events, "booking")
 
     async def test_a_slot_taken_in_the_meantime_is_relayed_in_the_tools_own_words(self):
@@ -670,7 +670,7 @@ class TestHowACallEnds:
         assert agenda.wants_human
         said = spoken(events).lower()
         assert "bring someone in" in said
-        assert "tuesday the fifth at nine in the morning" in said
+        assert "tuesday at nine in the morning" in said
         assert panels(events, "slots")
 
     async def test_a_call_that_wanted_a_person_is_written_down_as_one(self):

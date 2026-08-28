@@ -226,25 +226,18 @@ export function CallView({ store }: { store: LocalStore }) {
           {sharing ? (
             <Stage panels={state.panels} active={state.active} onPick={(i) => call.pickSlot(i)} />
           ) : (
-            <div className="meet-hero">
-              <AgentFace kind={face} call={call} state={state} />
-              <span className="pip-name">
-                <span className="live-dot" />
-                {state.agent ? `${state.agent.name} · ${state.agent.company}` : "…"}
-              </span>
+            /* NOT A SECOND FACE. The rail carries the agent for the whole call now, so the
+               stage showing one too was the same head twice, forty pixels apart. Before there
+               is anything to share the stage says what it is waiting for instead. */
+            <div className="meet-hero meet-idle">
+              <span className="live-dot" />
+              <p>{state.agent ? `${state.agent.name} is on the call` : "Connecting…"}</p>
+              <p className="tiny muted">
+                Ask to see the product and it will drive a browser here.
+              </p>
             </div>
           )}
         </div>
-
-        {sharing && (
-          <div className="meet-self" data-speaking={state.speaking}>
-            <AgentFace kind={face} call={call} state={state} />
-            <span className="pip-name">
-              <span className="live-dot" />
-              {state.agent?.name ?? "…"}
-            </span>
-          </div>
-        )}
 
         {caption && (
           <div className="meet-caption" data-partial={!state.caption || undefined}>
@@ -326,6 +319,34 @@ export function CallView({ store }: { store: LocalStore }) {
         </div>
       </div>
 
+      {/* THE RAIL. The agent at the top of the conversation rather than on top of the product.
+          Present for the whole call, because "who is talking and what did they just say" is the
+          one question a viewer has continuously — unlike the engine read-out, which is a
+          question you ask once. */}
+      <aside className="meet-rail">
+        <div className="rail-face" data-speaking={state.speaking}>
+          <AgentFace kind={face} call={call} state={state} />
+          <span className="pip-name">
+            <span className="live-dot" />
+            {state.agent ? `${state.agent.name} · ${state.agent.company}` : "…"}
+          </span>
+        </div>
+        <div className="rail-talk">
+          {state.turns.length === 0 && <p className="tiny muted">Listening…</p>}
+          {state.turns.map((turn, i) => (
+            <div className="turn" key={i}>
+              <span className="turn-who" data-who={turn.who}>
+                {turn.who === "agent" ? (state.agent?.name ?? "Agent") : "You"}
+              </span>
+              <div>
+                <p style={{ fontSize: "var(--t-sm)", lineHeight: 1.6 }}>{turn.text}</p>
+              </div>
+            </div>
+          ))}
+          <div ref={transcriptEnd} />
+        </div>
+      </aside>
+
       {showSide && (
         <aside className="meet-side">
           <Instruments
@@ -333,7 +354,6 @@ export function CallView({ store }: { store: LocalStore }) {
             stages={stages}
             lastAgent={lastAgent}
             store={store}
-            transcriptEnd={transcriptEnd}
           />
         </aside>
       )}
@@ -353,13 +373,11 @@ function Instruments({
   stages,
   lastAgent,
   store,
-  transcriptEnd,
 }: {
   state: CallState;
   stages: [string, number][];
   lastAgent: Turn | undefined;
   store: LocalStore;
-  transcriptEnd: React.MutableRefObject<HTMLDivElement | null>;
 }) {
   return (
     <>
@@ -467,7 +485,6 @@ function Instruments({
             </div>
           </div>
         ))}
-        <div ref={transcriptEnd} />
         {state.turns.length > 0 && (
           <button
             className="btn"
