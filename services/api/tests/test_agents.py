@@ -18,11 +18,11 @@ from pathlib import Path
 import pytest
 
 from rainmaker.agents.spec import (
-    MAX_KNOWLEDGE_CHARS,
-    AgentSpec,
     DEFAULT_VOICE,
+    MAX_KNOWLEDGE_CHARS,
     VOICE_CATALOGUE,
     VOICES,
+    AgentSpec,
     Fact,
     Guardrails,
     Need,

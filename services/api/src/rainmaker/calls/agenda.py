@@ -36,8 +36,8 @@ from typing import Any, Protocol
 
 from ..agents.quoting import (
     build_quote,
-    money_words,
     duration_from_conversation,
+    money_words,
     rate_period,
     seats_from_conversation,
     unit_words,

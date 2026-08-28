@@ -37,8 +37,8 @@ from typing import Any
 
 from ..agents.spec import DEFAULT_VOICE, VOICE_CATALOGUE
 from .clauses import split_clauses, take_speakable
-from .speech import say
 from .pipeline import Clip, LanguageModel, SpeechToText, TextToSpeech
+from .speech import say
 
 log = logging.getLogger("rainmaker.calls.providers")
 

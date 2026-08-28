@@ -1462,7 +1462,6 @@ class TestTheTourExplainsItselfWhenTheTenantSaidHow:
     def spec_with_reason():
         from dataclasses import replace
 
-        from rainmaker.agents.spec import TourStop
 
         base = nadia_spec()
         return replace(
