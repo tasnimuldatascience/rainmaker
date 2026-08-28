@@ -225,8 +225,8 @@ server — and `ARCHITECTURE.md` covers how the two are kept from drifting apart
 <div align="center">
 <img src="docs/img/disconnected.png" alt="The console with the connection severed, still working" width="100%">
 <br>
-<sub>Taken with the connection severed, then a full page reload. The badge reads
-<b>83 edits held on the device</b>, waiting to reconcile.</sub>
+<sub>Taken with the connection severed, then a full page reload. The badge counts the
+<b>edits held on the device</b>, waiting to reconcile.</sub>
 </div>
 
 ### Who is allowed to write
@@ -300,7 +300,7 @@ permanently alongside: on a call the thing worth looking at is the call.
 **1 — She reads their business before she says a word.** Not a lookup: a browser opens the pages
 behind their email domain and pulls out facts, each with the page it came from.
 
-<img src="docs/img/research-live.png" alt="Nine facts read live from stripe.com" width="100%">
+<img src="docs/img/research-live.png" alt="Facts read live from stripe.com, each with the page it came from" width="100%">
 
 **2 — Then she drives the product.** A real browser opens *our* pages — not theirs — and **scrolls
 to the thing she is about to talk about while you watch**, because a screen share is a page
