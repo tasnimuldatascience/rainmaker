@@ -111,6 +111,16 @@ export class LocalStore {
    * the query string used to BE the claim; now it is only a hint the token has to agree with.
    */
   private token = "";
+  /**
+   * Resolves once we know what the server has — or once it is clear we will not find out.
+   *
+   * Exists for exactly one caller: the demo seed, which must not write to a shared workspace
+   * on the strength of a local replica that has simply not caught up yet.
+   */
+  private firstSyncResolve: (() => void) | null = null;
+  private readonly firstSyncDone = new Promise<void>((resolve) => {
+    this.firstSyncResolve = resolve;
+  });
   /** Refused rather than disconnected: retrying will not help until membership changes. */
   private forbidden = false;
 
@@ -303,6 +313,36 @@ export class LocalStore {
     };
   }
 
+  /**
+   * Wait until this replica has heard from the relay, or give up after `ms`.
+   *
+   * The timeout resolves rather than rejects: a caller asking "has the server spoken" wants an
+   * answer, and "no" is one. What it must never do is hang the console on a network that is not
+   * coming back.
+   */
+  async whenSynced(ms = 4000): Promise<void> {
+    let timer: number | undefined;
+    await Promise.race([
+      this.firstSyncDone,
+      new Promise<void>((resolve) => {
+        timer = window.setTimeout(resolve, ms);
+      }),
+    ]);
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+
+  /** True once the relay has sent us anything at all. */
+  get hasHeardFromServer(): boolean {
+    return this.firstSyncResolve === null;
+  }
+
+  private settleFirstSync(): void {
+    if (this.firstSyncResolve) {
+      this.firstSyncResolve();
+      this.firstSyncResolve = null;
+    }
+  }
+
   private scheduleReconnect(): void {
     if (this.closed || this.reconnectTimer !== null) return;
     // Exponential backoff with jitter, capped at 30s. Jitter matters: without it every
@@ -344,6 +384,8 @@ export class LocalStore {
       }
       case "catchup":
       case "ops": {
+        // The first frame from the relay is the answer to "what is already here".
+        this.settleFirstSync();
         const ops = message.ops ?? [];
         for (const op of ops) this.replica.apply(op);
         if (typeof message.head === "number" && message.head > this.checkpoint) {

@@ -100,8 +100,18 @@ await shot("pipeline-light", async () => setTheme("light"));
 
 await shot("deal-drawer", async (p) => {
   await setTheme("dark");
-  await p.click(".deal");
+  // THE DEAL A CALL ACTUALLY LANDED ON, not whichever card sorts first. The README caption
+  // beside this image promises "the outcome, the transcript, and the notes, all written by the
+  // call" -- and `.deal` opened Helios Robotics, a seeded deal with an empty notes field and no
+  // call attached. The picture quietly said the opposite of the sentence under it.
+  await p.click('.deal:has-text("Corvus Data")');
   await p.waitForSelector(".drawer");
+  // The notes are the part the caption is about, so wait for them rather than for the drawer.
+  await p.waitForFunction(
+    () => (document.querySelector("#notes")?.value?.length ?? 0) > 0,
+    null,
+    { timeout: 15000 },
+  ).catch(() => console.warn("deal-drawer: notes never populated"));
 });
 
 await shot("research", async (p) => {

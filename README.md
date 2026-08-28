@@ -190,9 +190,10 @@ through, and arrives on the board as the same kind of change — which is why a 
 an agent's call landing exactly like a colleague's edit.
 
 <div align="center">
-<img src="docs/img/deal-drawer.png" alt="A deal with the call written into it" width="100%">
+<img src="docs/img/deal-drawer.png" alt="The deal drawer: stage, amount, tags and notes" width="100%">
 <br>
-<sub>The deal drawer: the outcome, the transcript, and the notes, all written by the call.</sub>
+<sub>The deal drawer. A finished call writes these same fields through the same tool server a
+rep's own edit goes through — the notes merge character by character, with no save button.</sub>
 </div>
 
 ### Why it is a CRDT and not a table

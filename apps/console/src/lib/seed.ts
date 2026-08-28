@@ -33,7 +33,20 @@ const NOTES: Record<string, string> = {
 };
 
 export async function seedIfEmpty(store: LocalStore): Promise<void> {
+  // WAIT UNTIL "IS THIS WORKSPACE EMPTY" IS ANSWERABLE. This used to run the moment the store
+  // existed, so a fresh browser profile — which is what every screenshot run and every new
+  // device is — saw its own empty replica and seeded a workspace that already had these deals.
+  //
+  // Two of the three writes below hid it. Fields are LWW registers and tags are an OR-set, so
+  // writing them twice changes nothing. Notes are an RGA sequence: it cannot tell that it has
+  // been given the same sentence before, so it appends. One deal's note reached 2,801 characters
+  // of the same paragraph repeated, which reads as a broken text merge and is not one.
+  await store.whenSynced();
   if (store.replica.list("deal").length > 0) return;
+  // Nothing arrived and nothing is here. An unreachable server and an empty workspace look
+  // identical from here, and seeding the wrong one is what caused the duplication — so a device
+  // that has never heard from the relay leaves it alone.
+  if (!store.hasHeardFromServer) return;
   for (const deal of DEALS) {
     store.setField("deal", deal.id, "name", deal.name);
     store.setField("deal", deal.id, "account", deal.account);
