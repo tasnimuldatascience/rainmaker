@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-668%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-745%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -249,6 +249,29 @@ That found two bugs reading the code had missed. Both were the same shape:
 > replica only.
 
 The failing case was two operations long. Nobody would have written that test by hand.
+
+### Who is allowed to write
+
+The server merges nothing, which leaves exactly one judgement it cannot delegate: whether you may
+write here at all. A client that decides that has decided nothing.
+
+Actor identity used to be `?actor=dana` in the socket's query string — not a claim about who you
+are, a claim you would like to make. It is now a signed grant naming one actor in one workspace:
+
+| | |
+|---|---|
+| **Identity** | The token is signed, so editing the actor invalidates it rather than changing who you are |
+| **Membership** | The `(workspace, actor)` pair must exist; a grant for one workspace does not open another |
+| **Attribution** | Every op's actor must match the grant's |
+| **Revocation** | Checked against the table on every use, so removing a member takes effect immediately rather than when their token expires |
+
+**Attribution is part of the merge, not part of the audit trail.** Ties between concurrent edits
+are broken by actor id — so an op wearing somebody else's actor does not merely misattribute an
+edit, it decides which edit wins.
+
+Enrolment is deliberately open: there is no sign-in screen, so `POST /api/sync/token` grants a
+token to whoever asks. That is one handler to put an identity provider in front of, and it is the
+cheap half; the enforcement underneath it is the half that is expensive to add later.
 
 ### And the two implementations agree
 
@@ -607,11 +630,11 @@ worse than the call it prevented.
 ## Tests
 
 ```bash
-npm test                       # 53 tests — syncing, text editing, the call surface
-pytest                         # 615 tests — research, syncing, the API, the live call, the tools
+npm test                       # 67 tests — syncing, text editing, the call surface
+pytest                         # 678 tests — research, syncing, the API, the live call, the tools
 ```
 
-668 tests in total. None of them load a language model: a test that spends six seconds on
+745 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |

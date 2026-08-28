@@ -72,8 +72,11 @@ from .calls.providers import (
 from .calls.session import CallSession, Prospect
 from .mcp.client import ToolBroker
 from .research import ResearchAgent, ResearchConfig, ResearchRequest, build_fetcher
+from .sync.compaction import compact_workspace
 from .sync.hub import SyncHub
+from .sync.membership import AuthError, Members, authorise_ops
 from .sync.oplog import OpLog
+from .sync.replicas import ReplicaRegistry
 
 log = logging.getLogger("rainmaker.api")
 
@@ -84,6 +87,8 @@ DEFAULT_WORKSPACE = "demo"
 class AppState:
     oplog: OpLog
     hub: SyncHub
+    members: Members
+    replicas: ReplicaRegistry
     agent: ResearchAgent
     llm: LanguageModel
     tts: TextToSpeech
@@ -119,12 +124,44 @@ async def _warm_engines() -> None:
             log.exception("failed to load %s; falling back", getattr(engine, "name", engine))
 
 
+#: How often the log is pruned. Hourly rather than on every append: compaction is a full scan of
+#: a workspace, and doing it on the write path would put a table scan inside the latency of
+#: dragging a card.
+SWEEP_SECONDS = int(os.environ.get("RAINMAKER_COMPACT_EVERY", "3600"))
+
+
+async def _sweep_log() -> None:
+    """Prune ops every replica has already acknowledged.
+
+    IN A THREAD, ALWAYS. `compact` is a blocking SQLite scan and delete; awaiting it on the event
+    loop would stall every live socket in the process for the duration, which on a busy workspace
+    is exactly the moment it must not.
+
+    A failure here is not a failure of the product. The log growing is a cost, not a corruption,
+    so this logs and goes back to sleep rather than taking the process down with it.
+    """
+    while True:
+        await asyncio.sleep(SWEEP_SECONDS)
+        try:
+            report = await asyncio.to_thread(
+                compact_workspace, state.oplog, state.replicas, DEFAULT_WORKSPACE
+            )
+            if report.dropped:
+                log.info("compacted %s: %s", DEFAULT_WORKSPACE, report.to_dict())
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a log that stays long is not an outage
+            log.warning("compaction sweep failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     state.oplog = OpLog(DATA_DIR / "oplog.sqlite3")
     state.oplog.ensure_workspace(DEFAULT_WORKSPACE, "Demo workspace")
     state.hub = SyncHub(state.oplog)
+    state.members = Members(DATA_DIR / "members.sqlite3")
+    state.replicas = ReplicaRegistry(DATA_DIR / "replicas.sqlite3")
 
     state.llm = build_language_model(os.environ.get("RAINMAKER_BRAIN", "auto"))
     state.tts = build_voice(os.environ.get("RAINMAKER_VOICE", "auto"))
@@ -139,6 +176,7 @@ async def lifespan(app: FastAPI):
     if hasattr(state.avatar, "lipsync"):
         state.avatar.lipsync = state.lipsync
     warming = asyncio.create_task(_warm_engines())
+    sweeping = asyncio.create_task(_sweep_log())
 
     # The tool servers are subprocesses and must be started and stopped from the SAME task —
     # `stdio_client` opens anyio cancel scopes that are task-bound. The lifespan is that task.
@@ -168,12 +206,24 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         warming.cancel()
+        sweeping.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await warming
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweeping
         await state.tools.close()
         state.agents.close()
         await state.agent.close()
         state.oplog.close()
+        state.replicas.close()
+        state.members.close()
+
+
+class TokenRequest(BaseModel):
+    """Ask for a token binding this actor to this workspace."""
+
+    workspace: str = DEFAULT_WORKSPACE
+    actor: str = ""
 
 
 class AppendRequest(BaseModel):
@@ -202,6 +252,10 @@ class AppendRequest(BaseModel):
     workspace: str = DEFAULT_WORKSPACE
     ops: list[dict[str, Any]] = Field(default_factory=list)
     client_id: str | None = None
+    #: The same signed token the socket presents. Carried in the body rather than a header
+    #: because this path exists for proxies that mangle WebSockets, and those are the proxies
+    #: most likely to strip an Authorization header too.
+    token: str = ""
 
 
 def create_app() -> FastAPI:
@@ -229,6 +283,10 @@ def create_app() -> FastAPI:
             "workspace": DEFAULT_WORKSPACE,
             **state.oplog.stats(DEFAULT_WORKSPACE),
             "live_clients": state.hub.live_count(DEFAULT_WORKSPACE),
+            # WHICH REPLICA IS HOLDING THE WATERMARK, BY NAME. "The log is not shrinking" is
+            # otherwise a mystery with a dozen causes; it is nearly always one replica that has
+            # not been seen, and this says which.
+            "compaction": state.replicas.describe(DEFAULT_WORKSPACE),
         }
 
     # ─────────────────────────────────────────────────────────── research
@@ -243,6 +301,49 @@ def create_app() -> FastAPI:
         return JSONResponse(payload)
 
     # ─────────────────────────────────────────────────────────── sync
+    @app.post("/api/sync/token")
+    async def sync_token(req: TokenRequest) -> dict[str, Any]:
+        """Enrol an actor in a workspace and return a signed token for the pair.
+
+        OPEN ENROLMENT IS A POLICY, AND IT IS THIS DEPLOYMENT'S. There is no sign-in screen, so
+        anyone who asks is enrolled — and that is the ONE thing to change for a real
+        deployment: put an identity provider in front of this handler and let it decide who
+        gets a grant. Everything downstream of the token is already the real enforcement, and
+        it is the half that is expensive to retrofit.
+
+        What this is NOT is "no auth". A token names one actor in one workspace, is signed, is
+        checked against the membership table on every use, and is revocable — see
+        `sync/membership.py`.
+        """
+        actor = req.actor.strip()
+        if not actor:
+            raise HTTPException(422, "actor is required")
+        try:
+            token = state.members.issue(req.workspace, actor)
+        except AuthError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"token": token, "workspace": req.workspace, "actor": actor}
+
+    @app.get("/api/sync/members")
+    async def sync_members(workspace: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
+        """Who may write here. Read-only, and it lists actors rather than people."""
+        return {"workspace": workspace, "members": state.members.members(workspace)}
+
+    @app.delete("/api/sync/members/{actor}")
+    async def revoke_member(actor: str, workspace: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
+        """Revoke a membership.
+
+        TAKES EFFECT ON THE NEXT USE, NOT ON TOKEN EXPIRY, because `verify` reads the table
+        every time rather than trusting the signature alone. An open socket keeps streaming
+        until it reconnects — closing live sockets on revoke is the obvious next step and is
+        not wired up.
+        """
+        # AND STOP HOLDING EVERYONE ELSE'S LOG. A departed replica that stays in the registry
+        # pins the watermark at whatever it last acknowledged, for the whole eviction horizon —
+        # so revoking a member would quietly stop compaction for a fortnight.
+        state.replicas.forget(workspace, actor)
+        return {"revoked": state.members.remove(workspace, actor)}
+
     @app.post("/api/sync/append")
     async def append(req: AppendRequest) -> dict[str, Any]:
         """The reconnect flush path.
@@ -251,6 +352,19 @@ def create_app() -> FastAPI:
         the op log's job, so a client that is unsure whether an earlier flush landed should
         simply send it again -- which is exactly what it does.
         """
+        # CHECKED BEFORE THE EMPTY-BODY SHORTCUT. An unauthenticated caller posting no ops
+        # used to learn the workspace's head, which is a small leak and an entirely free one
+        # to close.
+        try:
+            grant = state.members.verify(req.token, req.workspace)
+            authorise_ops(req.ops, grant)
+        except AuthError as exc:
+            raise HTTPException(401, str(exc)) from exc
+
+        # Posting proves this replica still exists, which is what keeps its unseen ops out of
+        # the compactor. It proves nothing about what it has applied.
+        state.replicas.touch(req.workspace, grant.actor)
+
         if not req.ops:
             return {"stored": 0, "head": state.oplog.head(req.workspace)}
         try:
@@ -271,9 +385,31 @@ def create_app() -> FastAPI:
     async def sync_ws(ws: WebSocket) -> None:
         await ws.accept()
         workspace = ws.query_params.get("workspace", DEFAULT_WORKSPACE)
-        actor = ws.query_params.get("actor", "anonymous")
         since_seq = int(ws.query_params.get("since", "0") or 0)
         sub_id = uuid.uuid4().hex
+
+        # THE ACTOR COMES FROM THE TOKEN, NOT FROM THE QUERY STRING. It used to come from
+        # `?actor=`, which is not a claim about who you are — it is a claim you would like to
+        # make. Everything downstream attributes ops to this value, and the CRDT breaks
+        # concurrent-edit ties with it.
+        try:
+            grant = state.members.verify(ws.query_params.get("token", ""), workspace)
+        except AuthError as exc:
+            # 1008 is "policy violation", which is the WebSocket close code that means this.
+            # Sent rather than simply dropping, so the console can tell "you are not allowed"
+            # apart from "the network went away" and stop retrying a socket that will never
+            # open.
+            await ws.send_json({"type": "unauthorised", "detail": str(exc)})
+            await ws.close(code=1008)
+            return
+        actor = grant.actor
+
+        # THIS IS THE ACKNOWLEDGEMENT COMPACTION RUNS ON. `since` is what this replica has
+        # already applied, it arrives on every connect, and it is now attributable to a verified
+        # actor — which is what makes it safe to prune anything below it. An unauthenticated
+        # `since` would let anyone advance the watermark past ops a real replica had not seen,
+        # and pruning those is the one way this system can lose data.
+        state.replicas.ack(workspace, actor, since_seq)
 
         sub = await state.hub.subscribe(workspace, actor, sub_id)
         try:
@@ -291,11 +427,28 @@ def create_app() -> FastAPI:
                 while True:
                     message = await ws.receive_json()
                     if message.get("type") == "ops":
-                        await state.hub.publish(
-                            workspace, message.get("ops") or [], origin=sub_id
-                        )
+                        ops = message.get("ops") or []
+                        try:
+                            authorise_ops(ops, grant)
+                        except AuthError as exc:
+                            # The socket is authenticated; this message is not entitled. Reject
+                            # the message and keep the connection, because the honest cause is a
+                            # client bug rather than an attack, and dropping the socket would
+                            # lose every op still queued behind it.
+                            await ws.send_json({"type": "rejected", "detail": str(exc)})
+                            continue
+                        await state.hub.publish(workspace, ops, origin=sub_id)
                     elif message.get("type") == "ping":
+                        # PRESENT, BUT NOT NECESSARILY CAUGHT UP. A heartbeat keeps a quiet
+                        # console from being evicted and its unseen ops pruned; it says nothing
+                        # about what that console has applied, so it must not move the ack.
+                        state.replicas.touch(workspace, actor)
                         await ws.send_json({"type": "pong"})
+                    elif message.get("type") == "ack":
+                        # An explicit, finer-grained acknowledgement for clients that apply ops
+                        # long after they connect. Optional: `since` already covers reconnects.
+                        with contextlib.suppress(TypeError, ValueError):
+                            state.replicas.ack(workspace, actor, int(message.get("seq", 0)))
             finally:
                 pump_task.cancel()
         except WebSocketDisconnect:

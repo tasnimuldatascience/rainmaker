@@ -22,6 +22,13 @@
  * `SpeechRecognition` in Chrome sends audio to Google. Typing works with the network off and
  * the whole agent — model and voice — runs locally either way. The console says so next to the
  * button rather than in a footnote.
+ *
+ * A DROPPED SOCKET IS NOT THE END OF THE CALL, but it is the end of what the agent remembers.
+ * The socket is reopened with backoff — see `scheduleReconnect` — and the transcript on screen
+ * survives, because the client owns it. The server does not: `CallSession` lives and dies with
+ * the socket, so the reopened call is a new session with an empty history. That is said out
+ * loud when it happens rather than papered over, and it is the one thing a real session-resume
+ * on the server would fix.
  */
 
 export type CallPhase =
@@ -250,6 +257,9 @@ export interface CallState {
   intakeError: string | null;
   intakeField: string | null;
   booked: boolean;
+  /** True between an unexpected socket drop and the call being back on its feet or given up
+   *  on. The transcript stays on screen throughout; only the connection is missing. */
+  reconnecting: boolean;
 }
 
 const IDLE: CallState = {
@@ -274,7 +284,51 @@ const IDLE: CallState = {
   intakeError: null,
   intakeField: null,
   booked: false,
+  reconnecting: false,
 };
+
+/**
+ * What the microphone is asked for whenever this file opens one itself.
+ *
+ * WHAT THESE THREE BUY, NARROWLY. They are implemented in the browser's native audio path and
+ * nothing written here could match them. What they do NOT do is reach the recogniser:
+ * `SpeechRecognition` opens its own capture and takes no constraints, so the half-duplex gate
+ * in `mouthOn` — close the mic for exactly as long as she is audible — is still the thing that
+ * stops her transcribing her own voice out of the speakers. What holding this stream does buy
+ * is a permission decision that happens once, explicitly, before a recogniser is started: a
+ * refusal is a rejected promise here instead of an opaque `not-allowed` arriving from a
+ * restart loop that has already run three times.
+ */
+const MIC_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
+/**
+ * How many times a dropped call is reopened before it is declared over.
+ *
+ * DELIBERATELY SMALL, AND NOT FOR POLITENESS. Every reconnect is a fresh socket, and the server
+ * counts a fresh socket as a fresh call — `Admission.may_start` allows one visitor six an hour.
+ * A retry loop as patient as the CRDT sync's would spend a prospect's whole hourly allowance on
+ * one bad minute of wifi and then hand them a refusal sentence instead of a call.
+ */
+const MAX_RECONNECTS = 3;
+
+/** Ceiling on the backoff. A voice call that has been silent for eight seconds is already an
+ *  awkward one; waiting thirty for the transport is not a call any more. */
+const MAX_RECONNECT_MS = 8_000;
+
+/**
+ * How often the client pings, and how long it waits for a pong before it gives up on the socket.
+ *
+ * A HALF-OPEN SOCKET NEVER FIRES `onclose`. A laptop lid closing, a NAT rebinding, a proxy
+ * dropping the connection without a FIN — in all three the socket stays `OPEN` forever and the
+ * reconnect below never runs, which is the failure it exists for. The server already answers
+ * `ping` with `pong`; nothing was sending one.
+ */
+const PING_MS = 15_000;
+const PONG_GRACE_MS = 40_000;
 
 /** Chrome exposes this prefixed; Safari does too. Neither ships types for it. */
 interface RecognitionLike {
@@ -330,9 +384,48 @@ export class LiveCall {
   /** Set while hands-free wants the mic open. Distinct from `listening`, which is whether it
    *  IS open — the two differ every time she speaks. */
   private wantsMic = false;
+  /** The echo-cancelled capture, held for as long as the mic is wanted. See `MIC_CONSTRAINTS`. */
+  private micStream: MediaStream | null = null;
   private restart: number | null = null;
   private listeners = new Set<(state: CallState) => void>();
   private state: CallState = { ...IDLE, micSupported: recognitionCtor() !== null };
+
+  /** The opening message this call was started with, replayed verbatim on a reconnect. */
+  private opening: Record<string, unknown> | null = null;
+  /** Set when THIS side ended the call — hang up, a refusal, a rejected form. A call the user
+   *  ended must never come back on its own, which is the whole reason this is not just a
+   *  `phase === "ended"` check: the phase is also where a dropped socket lands. */
+  private closedByUs = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: number | null = null;
+  /** Registered instead of a timer when the machine is offline — see `scheduleReconnect`. */
+  private waitingForNetwork: (() => void) | null = null;
+  private pingTimer: number | null = null;
+  private lastPongAt = 0;
+  /** What the prospect typed while the socket was away. Sent once it is back. */
+  private queued: string[] = [];
+
+  /**
+   * Bumped by every `stopAudio`. A clip that was decoding when the turn was cut is checked
+   * against this before it is scheduled.
+   *
+   * WITHOUT IT, BARGE-IN LEAKS. `play` awaits `decodeAudioData`, so a clause that arrived a
+   * moment before the prospect interrupted finishes decoding a few milliseconds AFTER
+   * `stopAudio` has emptied the queue, and schedules itself onto a timeline that is supposed to
+   * be silent: the agent says one more word out of the turn she was told to abandon.
+   */
+  private epoch = 0;
+
+  /**
+   * Clips are decoded one at a time, in the order they arrived.
+   *
+   * `decodeAudioData` takes as long as its buffer is big, and clauses are cut for synthesis
+   * latency rather than for length: the first is a dozen characters and the third can be a
+   * whole sentence. Decoding them concurrently — which is what calling an `async play` per
+   * message does — lets a short later clause win the race for `nextStart` and be spoken before
+   * the clause it follows. Ordering here costs nothing; the decode is not the bottleneck.
+   */
+  private decoding: Promise<void> = Promise.resolve();
 
   /**
    * Decoded mouth frames per clip, and when that clip starts on the audio clock.
@@ -376,6 +469,19 @@ export class LiveCall {
 
   async connect(who?: Intake): Promise<void> {
     if (this.socket) return;
+    this.closedByUs = false;
+    this.reconnectAttempt = 0;
+    this.queued = [];
+    this.opening = who
+      ? { type: "intake", name: who.name, email: who.email, company: who.company }
+      : { type: "start" };
+    // A SECOND CALL ON THE SAME INSTANCE IS THE COMMON CASE, not the exotic one: the console
+    // holds one `LiveCall` per agent for the life of the view, so ending a call and starting
+    // another reuses this object with every counter from the last one still in it.
+    this.nextStart = 0;
+    this.clipArrivedAt = null;
+    this.avatarMs = null;
+    this.sttMs = null;
     this.set({
       phase: "connecting",
       error: null,
@@ -389,24 +495,64 @@ export class LiveCall {
       active: null,
       booked: false,
       step: null,
+      reconnecting: false,
     });
+
+    await this.open();
+  }
+
+  /**
+   * Open the socket and send the opening message, on a first attempt or on a reconnect.
+   *
+   * A RECONNECT KEEPS EVERYTHING THE CLIENT OWNS AND NOTHING THE SERVER DID. The transcript,
+   * the panels and who she is talking to are all in this object and survive; the server's
+   * `CallSession` went with the old socket, so replaying the intake starts a genuinely new
+   * conversation that happens to be with the same person. She will introduce herself again.
+   * That is worse than a real resume and much better than a dead page, and the console says
+   * which of the two happened rather than letting the second greeting be the explanation.
+   */
+  private async open(resume = false): Promise<void> {
+    if (this.closedByUs || this.socket || !this.opening) return;
+    this.set({ phase: "connecting", reconnecting: resume });
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     // The key selects a published agent and authorises nothing. It is in the page source of
     // the customer's website already, so it is not a secret and is not treated as one.
     const query = this.agentKey ? `?key=${encodeURIComponent(this.agentKey)}` : "";
-    const socket = new WebSocket(`${proto}://${location.host}/api/calls/ws${query}`);
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(`${proto}://${location.host}/api/calls/ws${query}`);
+    } catch {
+      // A URL the browser refuses to open at all. On a first attempt that is a broken page, not
+      // a flaky network, so it is reported rather than retried.
+      if (resume) this.scheduleReconnect();
+      else this.set({ phase: "idle", error: "The call service did not answer." });
+      return;
+    }
     this.socket = socket;
 
     socket.onmessage = (event) => this.receive(JSON.parse(event.data));
-    socket.onerror = () =>
-      this.set({
-        phase: "idle",
-        error: "Could not reach the call service. Is the API running on port 8000?",
-      });
+    socket.onerror = () => {
+      // Deliberately quiet on a reconnect: `onclose` always follows and owns the retry, and
+      // handling both schedules two attempts for one failure.
+      if (!resume) {
+        this.set({
+          phase: "idle",
+          error: "Could not reach the call service. Is the API running on port 8000?",
+        });
+      }
+    };
     socket.onclose = () => {
+      // A socket superseded by a later attempt still fires its own close. It must not tear
+      // down the one that replaced it.
+      if (this.socket !== socket) return;
       this.socket = null;
-      if (this.state.phase !== "ended") this.set({ phase: "ended" });
+      this.stopHeartbeat();
+      if (this.closedByUs) {
+        if (this.state.phase !== "ended") this.set({ phase: "ended" });
+        return;
+      }
+      this.scheduleReconnect();
     };
 
     await new Promise<void>((resolve) => {
@@ -415,28 +561,145 @@ export class LiveCall {
       window.setTimeout(resolve, 4000);
     });
 
-    if (socket.readyState !== WebSocket.OPEN) {
-      this.set({ phase: "idle", error: "The call service did not answer." });
+    // Hung up while the socket was opening — four seconds is long enough for somebody to
+    // change their mind, and the call must not carry on being set up behind them.
+    if (this.closedByUs) {
       this.socket = null;
+      socket.close();
       return;
     }
 
+    if (socket.readyState !== WebSocket.OPEN) {
+      this.socket = null;
+      try {
+        socket.close();
+      } catch {
+        // Closing a socket that never opened is a no-op in every browser and throws in none;
+        // guarded because the fakes in the tests are not browsers.
+      }
+      if (resume) this.scheduleReconnect();
+      else this.set({ phase: "idle", error: "The call service did not answer." });
+      return;
+    }
+
+    this.reconnectAttempt = 0;
     this.captionParts = [];
-    socket.send(
-      JSON.stringify(
-        who
-          ? { type: "intake", name: who.name, email: who.email, company: who.company }
-          : { type: "start" },
-      ),
-    );
-    this.set({ phase: "greeting" });
+    socket.send(JSON.stringify(this.opening));
+    this.set({
+      phase: "greeting",
+      reconnecting: false,
+      // SAID OUT LOUD, ONCE. The person is about to be greeted a second time by someone who
+      // has forgotten the last five minutes, and the only thing worse than that happening is
+      // it happening without explanation.
+      error: resume
+        ? "The connection dropped and the call was reopened. The transcript above is intact; her memory of it is not."
+        : this.state.error,
+    });
+    this.startHeartbeat();
+    // Anything typed into the dead socket goes now, in the order it was typed.
+    const queued = this.queued;
+    this.queued = [];
+    queued.forEach((text) => this.send({ type: "say", text }));
+  }
+
+  /**
+   * Reopen a call that dropped on its own, with backoff, or give up and say so.
+   *
+   * NEVER RESURRECTS A CALL SOMEBODY ENDED — `closedByUs` covers hang-up, a refusal from
+   * admission and a rejected intake, all three of which close the socket deliberately and none
+   * of which get better on a second attempt.
+   */
+  private scheduleReconnect(): void {
+    if (this.closedByUs || this.reconnectTimer !== null || this.waitingForNetwork) return;
+
+    // The clips scheduled behind the drop are gone with the socket that was sending them.
+    // Leaving them queued plays half a sentence into a call that is no longer connected.
+    this.stopAudio();
+
+    // OFFLINE IS NOT A FAILED ATTEMPT. Three retries spent in three seconds while the wifi is
+    // still down is the exact case this exists for, and burning them there leaves nothing for
+    // the moment the network comes back. The browser tells us; wait to be told.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      this.set({ phase: "connecting", reconnecting: true });
+      const resume = () => {
+        this.waitingForNetwork = null;
+        void this.open(true);
+      };
+      this.waitingForNetwork = resume;
+      window.addEventListener("online", resume, { once: true });
+      return;
+    }
+
+    if (this.reconnectAttempt >= MAX_RECONNECTS) {
+      this.queued = [];
+      this.set({
+        phase: "ended",
+        reconnecting: false,
+        error: "The call service stopped answering. Everything said is in the transcript.",
+      });
+      return;
+    }
+
+    // Exponential backoff with jitter, as in the CRDT sync's relay socket. Jitter matters for
+    // the same reason there: every client that dropped during one server restart otherwise
+    // reconnects in the same millisecond and knocks it over again.
+    const base = Math.min(MAX_RECONNECT_MS, 500 * 2 ** this.reconnectAttempt);
+    const delay = base * (0.5 + Math.random() * 0.5);
+    this.reconnectAttempt += 1;
+    this.set({ phase: "connecting", reconnecting: true });
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.open(true);
+    }, delay);
+  }
+
+  private clearReconnect(): void {
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.waitingForNetwork) {
+      window.removeEventListener("online", this.waitingForNetwork);
+      this.waitingForNetwork = null;
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastPongAt = Date.now();
+    this.pingTimer = window.setInterval(() => {
+      const socket = this.socket;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - this.lastPongAt > PONG_GRACE_MS) {
+        // Nothing has come back for two and a half pings. Closing it ourselves is what turns a
+        // socket that is quietly dead into an `onclose`, which is the only thing the reconnect
+        // above listens to.
+        socket.close();
+        return;
+      }
+      socket.send(JSON.stringify({ type: "ping" }));
+    }, PING_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.pingTimer !== null) {
+      window.clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  /** Send if there is a socket. Never throws: a call mid-reconnect is not a broken program. */
+  private send(message: Record<string, unknown>): boolean {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify(message));
+    return true;
   }
 
   /** Accept one of the times she offered. */
   pickSlot(index: number): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     this.stopAudio();
-    this.socket.send(JSON.stringify({ type: "pick_slot", index }));
+    this.send({ type: "pick_slot", index });
     this.set({ phase: "thinking" });
   }
 
@@ -457,15 +720,28 @@ export class LiveCall {
         // Admission turned the call away, or ended one that had run too long. The server
         // writes the sentence: to a visitor on a customer's website this is the practice not
         // picking up, and a status code is not a thing you say to somebody.
+        //
+        // AND IT IS NOT RETRIED. A refusal is a decision, not a dropped packet; reopening the
+        // socket asks the same question of the same counters and spends another of the six
+        // calls this visitor is allowed in an hour to hear the same sentence again.
+        this.closedByUs = true;
+        this.clearReconnect();
         this.stopAudio();
-        this.set({ refused: String(message.spoken ?? ""), phase: "ended" });
+        this.set({ refused: String(message.spoken ?? ""), phase: "ended", reconnecting: false });
         break;
 
       case "no_agent":
+        this.closedByUs = true;
+        this.clearReconnect();
         this.set({
           refused: "This assistant isn't available right now.",
           phase: "ended",
+          reconnecting: false,
         });
+        break;
+
+      case "pong":
+        this.lastPongAt = Date.now();
         break;
 
       case "heard":
@@ -473,11 +749,15 @@ export class LiveCall {
         break;
 
       case "intake_error":
-        // Not a socket error. Someone mistyped their address and is watching a form.
+        // Not a socket error. Someone mistyped their address and is watching a form — so the
+        // socket is closed on purpose and must stay closed until they fix it and press start.
+        this.closedByUs = true;
+        this.clearReconnect();
         this.set({
           intakeError: String(message.spoken),
           intakeField: message.field ? String(message.field) : null,
           phase: "idle",
+          reconnecting: false,
         });
         this.socket?.close();
         break;
@@ -513,7 +793,7 @@ export class LiveCall {
         break;
 
       case "clip":
-        this.play(message as unknown as ClipMessage);
+        this.enqueue(message as unknown as ClipMessage);
         break;
 
       case "mouth":
@@ -555,7 +835,19 @@ export class LiveCall {
   // ── saying something ───────────────────────────────────────────────────
   say(text: string): void {
     const trimmed = text.trim();
-    if (!trimmed || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    if (!trimmed) return;
+
+    // TYPED INTO A SOCKET THAT IS COMING BACK. The control bar stays on screen through a
+    // reconnect — the call is not over — so without this the sentence somebody typed during
+    // those two seconds is swallowed with no error and no echo, which reads as the product
+    // ignoring them. Held, shown in the transcript because they did say it, and sent on open.
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      if (this.closedByUs || !this.state.reconnecting) return;
+      this.queued.push(trimmed);
+      this.pushTurn({ who: "prospect", text: trimmed });
+      this.set({ partial: "" });
+      return;
+    }
 
     // Barge-in. Someone who starts talking has stopped listening, and an agent that finishes
     // its sentence anyway is the most robotic thing it can do.
@@ -564,15 +856,13 @@ export class LiveCall {
     this.pushTurn({ who: "prospect", text: trimmed });
     this.captionParts = [];
     this.set({ phase: "thinking", partial: "", caption: "" });
-    this.socket.send(
-      JSON.stringify({
-        type: "say",
-        text: trimmed,
-        // The two stages only this side can see. See `LatencyBudget.adopt` on the server.
-        ...(this.sttMs !== null ? { stt_ms: this.sttMs } : {}),
-        ...(this.avatarMs !== null ? { avatar_ms: this.avatarMs } : {}),
-      }),
-    );
+    this.send({
+      type: "say",
+      text: trimmed,
+      // The two stages only this side can see. See `LatencyBudget.adopt` on the server.
+      ...(this.sttMs !== null ? { stt_ms: this.sttMs } : {}),
+      ...(this.avatarMs !== null ? { avatar_ms: this.avatarMs } : {}),
+    });
     // Cleared either way: a typed message has no transcription cost, and carrying the last
     // spoken turn's number into it would attribute time to a stage that did not run.
     this.sttMs = null;
@@ -589,14 +879,57 @@ export class LiveCall {
    * difference between this and holding a button: nothing to press, and the only thing you
    * cannot do is talk over her.
    *
-   * Full duplex — real barge-in — needs `getUserMedia` with echo cancellation and a
-   * transcriber that is not the Web Speech API. That is a different engine, not a flag.
+   * `holdMic` does take a capture with echo cancellation on, and that does not change the
+   * paragraph above: the recogniser still does not read it. Full duplex — real barge-in — needs
+   * a transcriber that is not the Web Speech API, which is a different engine, not a flag.
    */
   setHandsFree(on: boolean): void {
     this.wantsMic = on;
     this.set({ handsFree: on });
-    if (on) this.openMic();
-    else this.closeMic();
+    if (on) {
+      void this.holdMic();
+      this.openMic();
+    } else {
+      this.closeMic();
+      this.releaseMic();
+    }
+  }
+
+  /**
+   * Take the microphone with echo cancellation, noise suppression and gain control on.
+   *
+   * Deliberately not awaited by anything: recognition must not wait on a permission prompt, and
+   * a browser without `getUserMedia` — or a machine with no capture device — still gets exactly
+   * the call it got before this existed. See `MIC_CONSTRAINTS` for what these flags do and do
+   * not reach.
+   */
+  private async holdMic(): Promise<void> {
+    if (this.micStream || typeof navigator === "undefined" || !navigator.mediaDevices) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
+      // The mic may have been let go while the prompt was up. Holding an open capture after
+      // that leaves the browser's recording indicator lit with nothing listening.
+      if (!this.wantsMic && !this.recognition) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      this.micStream = stream;
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "";
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        // Permission refused, known one prompt earlier than the recogniser would have said so.
+        this.wantsMic = false;
+        this.closeMic();
+        this.set({ handsFree: false, error: "Microphone permission was refused." });
+      }
+      // Anything else — no device, a browser that will not enumerate — is not a reason to
+      // refuse to try the recogniser, which has its own capture and may well succeed.
+    }
+  }
+
+  private releaseMic(): void {
+    this.micStream?.getTracks().forEach((track) => track.stop());
+    this.micStream = null;
   }
 
   /** Called whenever she starts or stops speaking, to keep the mic out of her way. */
@@ -629,6 +962,7 @@ export class LiveCall {
     if (!Ctor || this.recognition) return;
 
     this.stopAudio(); // holding the button is a barge-in
+    void this.holdMic();
     const recognition = new Ctor();
     recognition.lang = "en-US";
     recognition.continuous = false;
@@ -679,6 +1013,10 @@ export class LiveCall {
       // keeps a permission failure from becoming a busy loop.
       if (this.wantsMic && !this.state.speaking) {
         this.restart = window.setTimeout(() => this.openMic(), 250);
+      } else if (!this.wantsMic) {
+        // Push-to-talk: the button is out, so the capture goes too. A recording indicator that
+        // stays lit after somebody let go of the mic button is the product lying about itself.
+        this.releaseMic();
       }
     };
 
@@ -706,6 +1044,12 @@ export class LiveCall {
         window.AudioContext ??
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new Ctor();
+      // A NEW CONTEXT STARTS A NEW CLOCK AT ZERO, and `nextStart` is a position on the old one.
+      // The console keeps one `LiveCall` per agent for the life of the view, so a second call
+      // in the same session arrived here with `nextStart` still holding the end of the last
+      // call's final clause: `Math.max(currentTime + 0.03, nextStart)` then scheduled the
+      // greeting two minutes into the future and the agent simply never spoke.
+      this.nextStart = 0;
       // Everything is routed through an analyser so the face has something REAL to move to.
       // A small FFT: this is used for loudness, not spectrum, and a big window adds latency
       // between the sound and the movement, which is the one thing that must not happen.
@@ -780,6 +1124,14 @@ export class LiveCall {
   mouthFrame(): ImageBitmap | null {
     if (!this.ctx || this.mouths.size === 0) return null;
     const now = this.ctx.currentTime;
+    let showing: ImageBitmap | null = null;
+    // SPENT CLIPS ARE DROPPED HERE, not at the end of the turn.
+    //
+    // `stopAudio` was the only thing that emptied this map, and a call where nobody interrupts
+    // never calls it: twenty-five decoded bitmaps per second of speech accumulate for the whole
+    // conversation, and this loop — which runs on the face's animation frame, sixty times a
+    // second — walks every clip the agent has ever said to find the one playing now.
+    const spent: number[] = [];
 
     for (const [index, mouth] of this.mouths) {
       const start = this.clipStarts.get(index);
@@ -787,12 +1139,32 @@ export class LiveCall {
       const elapsed = now - start;
       if (elapsed < 0) continue;
       const frame = Math.floor(elapsed * mouth.fps);
-      if (frame < mouth.frames.length) return mouth.frames[frame] ?? null;
+      if (frame < mouth.frames.length) {
+        if (showing === null) showing = mouth.frames[frame] ?? null;
+      } else {
+        spent.push(index);
+      }
     }
-    return null;
+
+    for (const index of spent) {
+      this.mouths.get(index)?.frames.forEach((frame) => frame.close());
+      this.mouths.delete(index);
+      this.clipStarts.delete(index);
+    }
+    return showing;
   }
 
-  private async play(clip: ClipMessage): Promise<void> {
+  /** Schedule a clip after every clip that arrived before it. See `decoding`. */
+  private enqueue(clip: ClipMessage): void {
+    const epoch = this.epoch;
+    this.decoding = this.decoding.then(() => this.play(clip, epoch)).catch(() => {
+      // A clip that could not be played is a lost clause. The chain stays alive for the next
+      // one; dropping it here would make one bad clip end every reply after it.
+    });
+  }
+
+  private async play(clip: ClipMessage, epoch: number): Promise<void> {
+    if (epoch !== this.epoch) return;
     if (this.clipArrivedAt === null) this.clipArrivedAt = performance.now();
 
     if (clip.browser_voice || !clip.wav) {
@@ -807,9 +1179,11 @@ export class LiveCall {
     } catch {
       // A clip that will not decode must not stop the call; the prospect loses a clause, not
       // the conversation.
-      this.speakInBrowser(clip);
+      if (epoch === this.epoch) this.speakInBrowser(clip);
       return;
     }
+    // Decoding took real time, and the turn may have been cut during it. See `epoch`.
+    if (epoch !== this.epoch) return;
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -879,10 +1253,20 @@ export class LiveCall {
   }
 
   private at(ms: number, run: () => void): void {
-    this.timers.push(window.setTimeout(run, ms));
+    // The id is dropped as it fires. `timers` is only emptied by `stopAudio`, and a call that
+    // is never interrupted runs two of these per clause for twenty minutes — a few thousand
+    // dead numbers held for the sake of one `clearTimeout` that will never be reached.
+    const id = window.setTimeout(() => {
+      const at = this.timers.indexOf(id);
+      if (at >= 0) this.timers.splice(at, 1);
+      run();
+    }, ms);
+    this.timers.push(id);
   }
 
   private stopAudio(): void {
+    // Anything still decoding belongs to the turn being abandoned. See `epoch`.
+    this.epoch += 1;
     this.sources.forEach((source) => {
       try {
         source.stop();
@@ -910,16 +1294,32 @@ export class LiveCall {
 
   // ── ending ─────────────────────────────────────────────────────────────
   hangUp(): void {
+    // FIRST, BEFORE ANYTHING CLOSES. `closedByUs` is what tells `onclose` this was a decision
+    // rather than a drop. Setting it after `socket.close()` is too late: the close handler has
+    // by then already scheduled a reconnect for the call somebody just ended.
+    this.closedByUs = true;
+    this.clearReconnect();
+    this.stopHeartbeat();
+    this.queued = [];
+    this.opening = null;
     this.wantsMic = false;
     this.stopAudio();
     this.closeMic();
+    this.releaseMic();
     this.socket?.close();
     this.socket = null;
     void this.ctx?.close();
     this.ctx = null;
     this.analyser = null;
     this.levelBuffer = null;
-    this.set({ phase: "ended", listening: false, handsFree: false, partial: "" });
+    this.nextStart = 0;
+    this.set({
+      phase: "ended",
+      listening: false,
+      handsFree: false,
+      partial: "",
+      reconnecting: false,
+    });
   }
 }
 

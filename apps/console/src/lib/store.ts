@@ -36,6 +36,14 @@ export interface StoreStatus {
   actor: string;
   lastError: string | null;
   lastSyncedAt: number | null;
+  /**
+   * The relay refused this replica, and retrying will not change that.
+   *
+   * DISTINCT FROM OFFLINE ON PURPOSE. "We cannot reach the server" resolves itself; "you are
+   * not a member of this workspace" does not, and showing the first when the second is true
+   * leaves someone watching a spinner for a permission problem.
+   */
+  forbidden: boolean;
 }
 
 type Listener = () => void;
@@ -95,6 +103,16 @@ export class LocalStore {
   private reconnectAttempt = 0;
   private reconnectTimer: number | null = null;
   private closed = false;
+  /**
+   * The signed grant that says this actor may write to this workspace.
+   *
+   * NOT A SECRET THE USER TYPES, and not one this client mints. It comes from the relay, it
+   * names the actor, and the relay checks it on every socket and every flush. The actor id in
+   * the query string used to BE the claim; now it is only a hint the token has to agree with.
+   */
+  private token = "";
+  /** Refused rather than disconnected: retrying will not help until membership changes. */
+  private forbidden = false;
 
   constructor(
     readonly actor: string,
@@ -112,7 +130,38 @@ export class LocalStore {
     // connection is healthy; only a working socket does that.
     window.addEventListener("online", this.onOnline);
     window.addEventListener("offline", this.onOffline);
+    // A TOKEN IS NOT REQUIRED TO START WORKING. Fetching it is a network call, and this
+    // console's whole premise is that an edit lands on the device whether or not the network
+    // is there. So the token is fetched on the way to the socket and the failure to get one is
+    // an ordinary disconnected state: edits queue, and the next attempt asks again.
+    await this.authorise();
     this.connect();
+  }
+
+  /**
+   * Exchange this replica's actor id for a signed grant.
+   *
+   * Kept separate from `connect` because it is also the recovery path: a token expires or a
+   * membership is revoked, the relay closes with `unauthorised`, and the next attempt has to
+   * ask for a new one rather than reconnecting with the same dead credential forever.
+   */
+  private async authorise(): Promise<boolean> {
+    try {
+      const res = await fetch("/api/sync/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: this.workspace, actor: this.actor }),
+      });
+      if (!res.ok) throw new Error(`token refused: ${res.status}`);
+      const body = (await res.json()) as { token?: string };
+      this.token = body.token ?? "";
+      this.forbidden = false;
+      return this.token !== "";
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      this.emit();
+      return false;
+    }
   }
 
   close(): void {
@@ -197,13 +246,23 @@ export class LocalStore {
   // ── network ────────────────────────────────────────────────────────────
   private connect(): void {
     if (this.closed || this.socket) return;
+    // WITHOUT A GRANT THERE IS NOTHING TO CONNECT WITH. Opening the socket anyway would be
+    // refused, count as a failed attempt, and back the retry off — so a missing token would
+    // look like a flaky network and get slower instead of being fixed.
+    if (!this.token) {
+      void this.authorise().then((ok) => {
+        if (ok && !this.closed && !this.socket) this.connect();
+        else this.scheduleReconnect();
+      });
+      return;
+    }
     this.setConnection("connecting");
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const url =
       `${proto}://${location.host}/api/sync/ws` +
       `?workspace=${encodeURIComponent(this.workspace)}` +
-      `&actor=${encodeURIComponent(this.actor)}` +
+      `&token=${encodeURIComponent(this.token)}` +
       `&since=${this.checkpoint}`;
 
     let socket: WebSocket;
@@ -258,8 +317,31 @@ export class LocalStore {
     }, delay);
   }
 
-  private receive(message: { type: string; ops?: Op[]; head?: number; more?: boolean }): void {
+  private receive(message: {
+    type: string;
+    ops?: Op[];
+    head?: number;
+    more?: boolean;
+    detail?: string;
+  }): void {
     switch (message.type) {
+      // THE GRANT WENT STALE, WHICH IS NOT THE NETWORK FAILING. A token expires, or a
+      // membership is revoked, and reconnecting with the same credential produces the same
+      // refusal forever. Drop it so the next attempt asks for a new one; if the relay refuses
+      // to issue, the outbox keeps the edits and the badge stops claiming to be syncing.
+      case "unauthorised": {
+        this.token = "";
+        this.lastError = message.detail ?? "not authorised for this workspace";
+        this.emit();
+        return;
+      }
+      // One message was refused, the socket is still good. The ops stay in the outbox, so
+      // this is a report rather than a recovery.
+      case "rejected": {
+        this.lastError = message.detail ?? "write rejected";
+        this.emit();
+        return;
+      }
       case "catchup":
       case "ops": {
         const ops = message.ops ?? [];
@@ -304,8 +386,17 @@ export class LocalStore {
           workspace: this.workspace,
           ops: pending,
           client_id: this.clientId,
+          token: this.token,
         }),
       });
+      // 401 IS NOT A NETWORK PROBLEM. Retrying the same dead token forever is how a revoked
+      // member's edits sit in an outbox that never drains and never says why. Ask for a new
+      // grant once; if that fails the ops stay queued and the badge stays honest.
+      if (res.status === 401) {
+        this.token = "";
+        this.forbidden = !(await this.authorise());
+        throw new Error("append rejected: not authorised for this workspace");
+      }
       if (!res.ok) throw new Error(`append failed: ${res.status}`);
       await this.ack(pending);
       this.lastSyncedAt = Date.now();
@@ -359,6 +450,7 @@ export class LocalStore {
         actor: this.actor,
         lastError: this.lastError,
         lastSyncedAt: this.lastSyncedAt,
+        forbidden: this.forbidden,
       };
     }
     return this.cachedStatus;

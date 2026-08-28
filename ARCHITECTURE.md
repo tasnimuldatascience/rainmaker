@@ -84,6 +84,83 @@ dedup, order, relay.
 every write has a rollback path and the UI must model "probably saved". A rep in a tunnel
 should not be looking at maybe-saved state.
 
+### Membership is checked at the relay, because nowhere else can check it
+
+**Chosen because** it is the only component both replicas trust. The server merges nothing and
+decides nothing about content — but every op crosses it, and a client that decides whether it is
+allowed to write has decided nothing at all.
+
+What replaced what: actor identity used to be `?actor=dana` in the socket's query string. That
+is not a claim about who you are, it is a claim you would like to make, and anyone able to open
+a socket could open it as anybody, into any workspace, with the op log attributing their writes
+accordingly. Now a signed grant names one actor in one workspace, and four things follow from
+it:
+
+| | |
+|---|---|
+| **Identity** | The token body is signed, so editing the actor invalidates the signature instead of changing who you are |
+| **Membership** | The `(workspace, actor)` pair must exist. A grant for one workspace does not open another |
+| **Attribution** | Every op's actor must match the grant's |
+| **Revocation** | Membership is a row, and `verify` reads it every time rather than trusting the signature — so removing a member takes effect on their next use rather than when their token expires |
+
+**Attribution is a correctness property, not an audit trail.** The CRDT breaks
+hybrid-logical-clock ties by actor id. An op wearing somebody else's actor does not merely
+misattribute an edit; it decides which of two concurrent edits wins. That places this check
+inside the merge's correctness rather than beside it.
+
+**Rejected: a session table.** The relay is the hot path and a signature check is a hash rather
+than a query. The cost is that a token cannot be invalidated before it expires — which is
+exactly why membership is still read from the table on every use, so revocation does not have to
+wait for one.
+
+**Enrolment is open, and that is a policy rather than an oversight.** `POST /api/sync/token`
+grants a token to whoever asks, because this deployment has no sign-in screen. That is one
+handler to put an identity provider in front of, and it is the cheap half. The enforcement
+underneath it is the half that is expensive to retrofit, and it is real. A test pins the open
+enrolment as a decision, so that adding an IdP later breaks something that says what the old
+behaviour was rather than silently changing what the system means.
+
+### The log is pruned, not snapshotted
+
+**Chosen because** a snapshot would require the server to materialise state, and the server does
+not implement RGA — deliberately, because a second sequence CRDT in a second language is where
+drift would be worst. Compaction instead deletes ops that provably cannot change the outcome,
+which needs no merge and leaves the remaining log replayable by exactly the code that replayed
+the full one.
+
+**A watermark decides when, and it is the entire safety argument.** An op may be dropped only
+once *every* replica has acknowledged it. If replica R wrote an insert and another replica
+deleted that character, dropping both while R is behind leaves the character visible on R
+forever — divergence that no later op repairs. So the watermark is the minimum acknowledged
+sequence across known replicas, and an empty registry means *compact nothing* rather than
+"everyone is up to date". The acknowledgement is the `?since=` the console already sends, which
+is why this needed no client release — and it is trustworthy only because that socket is now
+authenticated.
+
+**Then three rules, one per merge type:**
+
+| | |
+|---|---|
+| **LWW register** | Keep the hybrid-logical-clock winner per field; drop the losers |
+| **OR-set** | An add and the remove that annihilates it can both go |
+| **RGA** | An insert and delete for a dead character can go — **unless a living character anchors to it**, in which case the insert stays as a tombstone anchor. Drop it and the survivor's `after` dangles, and it orphans on replay |
+
+**And a fourth rule that only appears once the first three are correct together.** Each rule is
+individually sound, and applied together they can empty an entity completely: a deal whose whole
+history is one tag added and removed, or one note typed and then deleted, compacts to nothing —
+and an entity nothing mentions is an entity nobody created. It leaves the board. So compaction
+retains one *witness* pair per entity and per text field, chosen at the head of the document so
+the witness cannot itself be orphaned. It costs about two ops per text field, permanently, and
+without it the property test's exact-equality assertion is simply false.
+
+**Proved rather than argued.** 200 randomised logs at random watermarks assert that materialising
+the compacted log equals materialising the full one, exactly; a structural check asserts no
+surviving insert names an anchor that is gone. RGA cannot be checked in Python, so the fixture
+bridge runs the other way from `crdt_agreement.json`: the real compactor emits cases, and the
+real TypeScript replica asserts the full and compacted logs render identical text with no
+orphans, under shuffled delivery. Disabling anchor retention fails that; dropping every removal
+below the watermark fails the property test.
+
 ### Sequence numbers, not vector clocks
 
 **Chosen because** the CRDT already handles concurrency. The server only has to answer *what
@@ -252,16 +329,34 @@ declining it is stated in the product rather than hidden.
 
 ## Not built
 
-- **Auth.** Actor identity is a per-browser id. A real deployment needs workspace membership
-  enforced at the relay, which is the only place it can be enforced — a client that decides
-  whether it is allowed to write has decided nothing.
-- **Log compaction.** The op log grows forever. A production system needs periodic snapshotting
-  with tombstone GC — which for RGA means proving no live insert anchors to a collected
-  character, and getting that wrong resurrects deleted text on one replica only.
-- **Real WebRTC media.** The conversation is real and runs over a WebSocket, with audio sent as
-  base64 WAV per clause. That is fine on a local network and wrong on a lossy one: a production
-  deployment wants LiveKit or equivalent for jitter buffering, reconnects and echo cancellation,
-  none of which is here.
+- **An identity provider, and closing live sockets on revoke.** Membership itself is now
+  enforced at the relay: a signed grant names one actor in one workspace, it is checked against
+  the membership table on every socket and every flush rather than trusted on its signature
+  alone — so revoking a member takes effect on their next use, not on their token's expiry —
+  and every op must be attributed to the actor the grant names, because the CRDT breaks
+  concurrent-edit ties by actor id and forging an actor forges the outcome of a merge rather
+  than merely its byline. What is missing is anything deciding *who* gets a grant:
+  `POST /api/sync/token` enrols whoever asks, because there is no sign-in screen to ask them.
+  That is one handler to put an identity provider in front of, and the enforcement below it —
+  the expensive half to retrofit — is already real. An open socket also keeps streaming until
+  it reconnects; revocation should hang up.
+- **An SFU, and the media transport that comes with one.** Audio runs over the call WebSocket as
+  base64 WAV per clause. Three of the four things usually cited to justify WebRTC here are
+  built: clips are scheduled ahead on the Web Audio clock, in arrival order, which is a playout
+  buffer; the socket has a heartbeat and reconnects with bounded backoff, keeping the transcript
+  across a drop; and the microphone is opened with echo cancellation, noise suppression and gain
+  control asked for explicitly. The transport is the part that is not. TCP retransmits rather
+  than conceals, so a lossy link grows latency instead of degrading audio, and there is no FEC,
+  no partial-frame codec and no adaptive buffer depth to trade against it. Two further limits
+  are real and worth naming: the reconnect restores the socket, not the server's `CallSession`,
+  so the agent comes back without the conversation; and a second human on the call — the rep a
+  handoff exists for — needs an SFU, which is a service a fresh clone would have to run.
+- **A resync signal for a replica that was gone too long.** Compaction evicts a replica unseen
+  for the horizon (a fortnight by default) so one dead device cannot stop the log being pruned
+  forever. A replica that returns after that may find ops it never saw already gone. Its recovery
+  is a full replay from `since=0`, which is correct — the compacted log materialises identically
+  — but nothing tells the console to do it, so it would sit on a checkpoint the server can no
+  longer honour.
 - **A commercially licensed talking head.** The face lip-syncs, on the local GPU, via Wav2Lip —
   whose weights are academic and personal use only. Every other dependency here is permissive.
   A hosted provider behind the same interface is the commercial path and is not wired up.

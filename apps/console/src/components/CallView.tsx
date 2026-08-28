@@ -217,9 +217,19 @@ export function CallView({ store }: { store: LocalStore }) {
     <div className="meet" data-side={showSide}>
       <div className="meet-stage">
         <div className="meet-top">
+          {/* RECONNECTING IS THE FIRST THING THE CHIP SAYS. A call whose socket has gone still
+              looks exactly like a call waiting for a slow model — same face, same transcript,
+              same silence — and the difference is the only one the person watching can act on. */}
           <span className="meet-chip" data-live>
-            <span className="live-dot" />
-            {state.speaking ? "Speaking" : state.listening ? "Listening" : "On a call"}
+            {/* The pulsing dot means a live connection. During a reconnect there is not one. */}
+            {!state.reconnecting && <span className="live-dot" />}
+            {state.reconnecting
+              ? "Reconnecting…"
+              : state.speaking
+                ? "Speaking"
+                : state.listening
+                  ? "Listening"
+                  : "On a call"}
           </span>
           {state.step && <StepRail step={state.step} />}
         </div>

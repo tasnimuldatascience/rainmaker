@@ -76,8 +76,8 @@ export function PipelineBoard({
         <div>
           <h1>Pipeline</h1>
           <p>
-            Every change here is written to this device first and synced when there is a
-            connection. Drag a card to move a stage — it works with the network off.
+            Every change here is written to this device first and reconciled afterwards. Drag
+            a card to move a stage — it lands instantly and never waits for a round trip.
           </p>
         </div>
       </div>

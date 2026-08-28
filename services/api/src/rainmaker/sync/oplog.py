@@ -17,6 +17,14 @@ What the server IS responsible for:
   AUTHORISATION   ops are attributed to an actor and scoped to a workspace. The CRDT has no
                   concept of permission; that boundary can only be enforced here.
 
+COMPACTION IS NOT A FIFTH RESPONSIBILITY. `compact()` deletes ops that some other op in the
+same log already makes redundant, under a watermark every replica has acknowledged. It does not
+merge, does not materialise, and does not write an op — after it runs, every row is still a
+byte-identical op some client originated, and replaying the log still produces the state it
+produced before. It exists because DURABILITY above has no expiry date and a log that only grows
+eventually stops being durable in any useful sense. The rules and their proofs are in
+`compaction.py`; the watermark comes from `replicas.py`.
+
 SQLite, not Postgres. The op log is an append-only table with one index and no joins; the
 bottleneck is fsync, not query planning. WAL mode gives concurrent readers alongside the
 writer, which is the actual access pattern (many streaming clients, one append path). Moving
@@ -35,6 +43,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from .compaction import CompactionReport, plan_compaction
 
 log = logging.getLogger("rainmaker.sync.oplog")
 
@@ -226,6 +236,66 @@ class OpLog:
                 return
             yield chunk
             seq = chunk[-1].seq
+
+    # ------------------------------------------------------------------ compaction
+    def compact(
+        self, workspace: str, watermark: int, *, dry_run: bool = False
+    ) -> CompactionReport:
+        """Delete ops at or below `watermark` that are provably redundant.
+
+        The rules and the proofs behind them are in `compaction.py`; this method is the storage
+        half. `watermark` must come from `ReplicaRegistry.watermark` — see `compact_workspace`,
+        which is the call site that cannot get the pairing wrong.
+
+        THE HEAD OP IS NEVER PRUNED, which is why the watermark is capped at `head - 1`. Clients
+        checkpoint on the `head` this log reports and resume with `since=head`; if compaction
+        deleted the highest-sequence row, `head()` would go BACKWARDS and a client that had
+        correctly acknowledged seq 900 would be told the workspace is at 870. Nothing downstream
+        is prepared for a log that shrinks at the top, and the cost of the rule is one retained
+        op.
+        """
+        head = self.head(workspace)
+        ceiling = min(watermark, head - 1)
+        ops = [op for chunk in self.iter_all(workspace) for op in chunk]
+        plan = plan_compaction(ops, ceiling)
+
+        if plan.drop and not dry_run:
+            with self._lock:
+                # Chunked because SQLite's default host-parameter limit is 999 and a first
+                # compaction of a busy workspace deletes far more than that. All chunks share one
+                # transaction: a compaction that half-committed could leave a `removeTag` without
+                # the adds it annihilates, which is exactly the resurrection these rules exist to
+                # prevent.
+                for start in range(0, len(plan.drop), 500):
+                    batch = plan.drop[start : start + 500]
+                    self._conn.execute(
+                        "DELETE FROM ops WHERE workspace = ? AND seq IN"
+                        f" ({','.join('?' * len(batch))})",
+                        (workspace, *batch),
+                    )
+                self._conn.commit()
+            # Space goes back to SQLite's free list, not to the filesystem. VACUUM would return
+            # it and locks the database for the duration, which is a deployment decision rather
+            # than something a live relay should do to itself mid-traffic.
+
+        report = CompactionReport(
+            workspace=workspace,
+            watermark=ceiling,
+            scanned=plan.scanned,
+            dropped=len(plan.drop),
+            by_rule=plan.by_rule,
+            anchors_retained=plan.anchors_retained,
+            head=head,
+            dry_run=dry_run,
+        )
+        if plan.drop:
+            log.info(
+                "compacted ws=%s watermark=%d: dropped %d of %d ops %s "
+                "(%d tombstone anchors retained)%s",
+                workspace, ceiling, report.dropped, report.scanned, plan.by_rule,
+                plan.anchors_retained, " [dry run]" if dry_run else "",
+            )
+        return report
 
     # ------------------------------------------------------------------ workspaces
     def ensure_workspace(self, workspace_id: str, name: str = "") -> None:
