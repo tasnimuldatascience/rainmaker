@@ -89,7 +89,7 @@ class ClientSpeechToText(SpeechToText):
     actually latency-critical. Running faster-whisper server-side would compete with Kokoro for
     the same cores and make the reply slower to arrive than the transcription was to produce.
 
-    The honest cost, stated because the rest of this project is local-first: Chrome's
+    The honest cost, stated because nothing else in this project leaves the box: Chrome's
     implementation sends audio to Google. Typing is the path that does not, and the console
     says so.
 

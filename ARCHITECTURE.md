@@ -217,7 +217,7 @@ guarantee keeping the model honest silently did not apply. Now a `model_validato
 same domain twice reported every skip twice and the agent was not idempotent.
 
 **5. No cold start when disconnected.** The screenshot script tried to reload with the network
-severed and got `ERR_INTERNET_DISCONNECTED` — proving the app could not boot despite all the local
+severed and got `ERR_INTERNET_DISCONNECTED` — proving the app could not boot despite all the cached
 data being present. Fixed with a service worker; the shot is now in the README as evidence.
 
 **6. A price the model invented, said out loud.** Found by driving a real call rather than by a

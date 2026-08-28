@@ -54,7 +54,7 @@ const PROV_TITLE: Record<Provenance, string> = {
  * The agent may only state facts that came from somewhere, and this is where they come from —
  * `CallView` reads it back and sends it as the call's brief. Stored rather than lifted into
  * shared state because a rep who researched a company yesterday should not have to do it again
- * before ringing them, which is the same reason the pipeline itself is local-first.
+ * before ringing them, which is the same reason the pipeline writes to the device first.
  *
  * Failing silently is correct here: a brief that cannot be saved costs the agent some
  * specificity, and an error toast about localStorage in the middle of research helps no one.

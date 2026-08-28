@@ -9,7 +9,7 @@ Four surfaces, one process:
 
 The console never talks to /api/deals to WRITE. Every mutation goes through the op log so the
 disconnected path and the connected path are the same path — a write that only works when connected is
-a write the local-first design would have to special-case, and special cases are where
+a write the design would have to special-case, and special cases are where
 divergence lives.
 """
 
@@ -208,7 +208,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Rainmaker",
         version="0.1.0",
-        description="AI sales agent platform with a local-first rep console.",
+        description="AI sales agent platform with a conflict-free rep console.",
         lifespan=lifespan,
     )
     # The console is served from a different origin in development (Vite on :5173).

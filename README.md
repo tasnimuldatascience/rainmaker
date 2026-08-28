@@ -161,71 +161,116 @@ drives a live browser to pages on that host.
 
 ---
 
-## The board is local-first
+## The pipeline
 
-Not "shows you a cached page". **Every edit is written to the device first and reconciled
-afterwards**, so the board never blocks on a round trip and never loses an edit to a
-connection that dropped mid-save.
+A call that nobody writes down did not happen. The agent takes the conversation; the board is
+where it lands — and it is the same board a rep works from afterwards, not a separate log.
 
 <div align="center">
-<img src="docs/img/disconnected.png" alt="Rainmaker with the connection severed, still working" width="100%">
+<img src="docs/img/pipeline-dark.png" alt="The pipeline board" width="100%">
+</div>
+
+Five stages, and a deal moves through them by being dragged or by a call deciding it moved:
+
+```
+Discovery  ->  Qualified  ->  Proposal  ->  Negotiation  ->  Closed won
+```
+
+### What a call writes when it ends
+
+The moment a call finishes — including when it finishes because somebody closed the tab, which
+is most of them — the agent writes itself down through the CRM tool server:
+
+| Written | From |
+|---|---|
+| The outcome | `checkout_sent`, `meeting_booked`, `handed_off` or `no_decision`, decided in code from what actually happened |
+| A one-line summary | Company, and what the call reached — "demo booked for Thursday at two" |
+| The full transcript | Every turn, on the deal record |
+| The stage | A booked meeting moves the deal to `demo`; nothing else moves it |
+| The booking | Time, attendee, and the reference the calendar issued |
+
+None of that is a special path. It goes through the same tool server a rep's own edit goes
+through, and arrives on the board as the same kind of change — which is why a rep's laptop shows
+an agent's call landing exactly like a colleague's edit.
+
+<div align="center">
+<img src="docs/img/deal-drawer.png" alt="A deal with the call written into it" width="100%">
 <br>
-<sub>Taken with the connection severed, then a full page reload. The badge shows
+<sub>The deal drawer: the outcome, the transcript, and the notes, all written by the call.</sub>
+</div>
+
+### Why it is a CRDT and not a table
+
+Two reasons, and the second is the one that made the decision.
+
+**A rep on a train.** Dragging a deal should be instant whatever the network is doing, and an
+edit should not be lost to a request that failed halfway.
+
+**An agent and a human editing the same deal at the same time.** This is not hypothetical here:
+the agent finishes a call and writes an outcome at the same moment a rep is retyping the notes on
+that deal. With a server that decides, one of them loses. There is no ordering of those two
+events that makes "last write wins" correct — the rep's notes and the agent's outcome are both
+true, and they are about different fields of the same row.
+
+So the server never decides. It collects changes and passes them on, and the merge rules live in
+the data:
+
+| Type | Used for | Rule |
+|---|---|---|
+| **LWW register** | value, stage, company, notes | Latest hybrid-logical timestamp wins, actor id breaks ties |
+| **OR-set** | tags | A concurrent add beats a remove, so a tag never vanishes because two people touched it |
+| **Sequence** | note text | Characters keep their identity, so two people typing in one note do not corrupt it |
+
+Every change carries a **hybrid logical clock** rather than a wall clock, because two machines
+routinely produce the same millisecond and a wall clock that steps backwards would silently
+reorder history.
+
+<div align="center">
+<img src="docs/img/disconnected.png" alt="The console with the connection severed, still working" width="100%">
+<br>
+<sub>Taken with the connection severed, then a full page reload. The badge reads
 <b>83 edits held on the device</b>, waiting to reconcile.</sub>
 </div>
 
-This is a property of the pipeline board, not a pitch: a rep on a train should be able to work
-the deals the agent filled the board with. The interesting engineering is below.
+### Proving the merge is actually correct
 
-### How it works
+You cannot test convergence with a handful of examples, because the bugs live in orderings
+nobody thinks to write down.
 
-Normally, saving something means asking a server and waiting. If the server cannot be reached,
-you get an error and your work is stuck.
-
-Rainmaker never asks. Every edit is saved on your device immediately, and the change is queued to
-send later. The server's only job is to collect changes and pass them on — **it never decides who
-wins.**
-
-That raises an obvious problem: what if two people edit the same deal while neither can
-reach the server?
-
-The answer is a **CRDT** — a way of storing data where changes can arrive in any order, or twice,
-or years late, and everyone still ends up with the same result.
-
-### Testing it properly
-
-You cannot test this with a handful of examples, because the bugs live in orderings nobody thinks
-to write down.
-
-So the tests generate **300 random sequences of edits**, deliver them to two devices in different
-orders, and check both end up identical:
+So the tests generate **300 random sequences of edits**, deliver them to two replicas in
+different orders, and assert both end up identical:
 
 ```
 For any set of edits, delivered in any two orders:
-    device A's result  ==  device B's result
+    replica A's result  ==  replica B's result
 ```
 
-That found two bugs that reading the code had missed. Both were the same shape:
+That found two bugs reading the code had missed. Both were the same shape:
 
 > **A deletion arriving before the thing it deletes.** Delete a character, and if that deletion
-> reaches the other device before the original typing does, the character comes back — on one
-> device only.
+> reaches the other replica before the original typing does, the character comes back — on one
+> replica only.
 
-The failing case the test found was two operations long. Nobody would have written that test
-by hand.
+The failing case was two operations long. Nobody would have written that test by hand.
 
-### Two versions of the same rules
+### And the two implementations agree
 
-The dashboard merges changes in TypeScript. The backend does the same in Python.
+The merge exists twice — TypeScript in the console, Python on the server — because both have to
+be able to answer "what does this deal look like now". Two implementations of a merge rule is
+two chances to be subtly different, and a divergence would show up as a deal that reads one way
+in the browser and another way in the API.
 
-Two implementations of the same rule **will** drift apart eventually, and when they do, the
-dashboard and the backend quietly disagree about a customer's deal. Nothing errors. Nobody
-notices.
+So CI generates fixtures from the TypeScript implementation, fails if they are not committed and
+current, and runs the Python implementation against them:
 
-So the TypeScript version runs seven scenarios and records what it decided. The Python tests then
-check they agree. These recordings are **generated by running the real code**, never written by
-hand — a hand-written expectation only records what the author *believed* both sides do, which is
-exactly the thing being tested.
+```bash
+npx tsx packages/crdt/scripts/fixtures.ts   # seven ordering cases, from the TS replica
+git diff --exit-code services/api/tests/fixtures
+pytest services/api -q -k Agrees            # Python must reach the same state
+```
+
+Change one side's merge without the other and the build goes red on the diff, before anybody
+reads a wrong number off a board.
 
 ---
 
@@ -647,7 +692,7 @@ matched.
 ## Project layout
 
 ```
-packages/crdt          the local-first sync primitives          (TypeScript)
+packages/crdt          the conflict-free merge types            (TypeScript)
 apps/console           the dashboard and the call surface       (React)
 services/api
   calls/

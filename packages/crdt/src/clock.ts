@@ -1,7 +1,7 @@
 /**
  * Hybrid Logical Clocks (Kulkarni et al., 2014).
  *
- * WHY NOT WALL CLOCK. A local-first console writes while disconnected, so two replicas routinely
+ * WHY NOT WALL CLOCK. The console writes without waiting for a server, so two replicas routinely
  * produce edits with no communication between them. Last-write-wins on `Date.now()` means the
  * winner is decided by whichever laptop's clock drifted further ahead — and clock skew on
  * consumer machines is regularly seconds, sometimes minutes. A rep whose clock runs fast wins

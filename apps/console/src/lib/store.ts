@@ -1,5 +1,5 @@
 /**
- * The local-first store: a CRDT replica that survives a page reload and a dead network.
+ * The store: a CRDT replica that survives a page reload and a dead network.
  *
  * THE INVARIANT THIS FILE EXISTS TO HOLD: a write succeeds locally, always, immediately, with
  * no network involved. Everything else — persistence, queueing, reconnection, replay — is

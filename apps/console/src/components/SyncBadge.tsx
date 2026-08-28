@@ -1,11 +1,11 @@
 /**
  * The sync indicator.
  *
- * This is the most important pixel in a local-first app. The user needs to know, without
- * asking, whether their work is safe — and the honest answer has three states, not two:
+ * This is the most important pixel in the console. The user needs to know, without asking,
+ * whether their work is safe — and the honest answer has three states, not two:
  *
  *   live      everything is on the server
- *   local     nothing is being lost; N edits are held on the device and will send
+ *   unsynced  nothing is being lost; N edits are held on the device and will send
  *   syncing   catching up right now
  *
  * That state is deliberately NOT styled as an error. It is a normal, supported mode of
@@ -20,7 +20,7 @@ const LABEL: Record<StoreStatus["connection"], string> = {
   live: "Synced",
   syncing: "Syncing",
   connecting: "Connecting",
-  offline: "Working locally",
+  offline: "Unsynced",
 };
 
 export function SyncBadge({ status }: { status: StoreStatus }) {

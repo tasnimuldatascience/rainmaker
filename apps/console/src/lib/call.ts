@@ -18,7 +18,7 @@
  * character while holding the real audio in its hand — the single most obvious tell that the
  * animation was decorative.
  *
- * WHAT THE MICROPHONE COSTS, stated plainly because the rest of this product is local-first:
+ * WHAT THE MICROPHONE COSTS, stated plainly because nothing else in this product leaves the box:
  * `SpeechRecognition` in Chrome sends audio to Google. Typing works with the network off and
  * the whole agent — model and voice — runs locally either way. The console says so next to the
  * button rather than in a footnote.
