@@ -9,7 +9,7 @@
  */
 
 import { chromium } from "playwright";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -18,6 +18,13 @@ const OUT = resolve(ROOT, "docs/img");
 const BASE = process.argv.includes("--base")
   ? process.argv[process.argv.indexOf("--base") + 1]
   : "http://127.0.0.1:5174";
+
+// Which shots to take. Empty means all of them; `--only mouth` is one, named the same as the
+// file it writes, so debugging one picture does not cost a run of every other.
+const ONLY = process.argv.includes("--only")
+  ? process.argv[process.argv.indexOf("--only") + 1]
+  : "";
+const wanted = (name) => !ONLY || ONLY === name;
 
 mkdirSync(OUT, { recursive: true });
 
@@ -34,6 +41,7 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 
 async function shot(name, prepare, settleMs = 600) {
+  if (!wanted(name)) return;
   await page.goto(BASE, { waitUntil: "networkidle" });
   // The seed writes through the op path, so give the replica a beat to hydrate and render.
   await page.waitForSelector(".deal", { timeout: 15000 }).catch(() => {});
@@ -182,71 +190,6 @@ await shot("checkout", async (p) => {
   await p.waitForSelector('a:has-text("Open the checkout")', { timeout: 120000 });
 }, 400);
 
-// Consecutive frames of her face mid-sentence, for the README's lip-sync claim. Cropped to the
-// floating window and captured a fraction of a second apart, so the mouths visibly differ --
-// the claim is that she is talking, and a single still cannot show that.
-{
-  await page.goto(BASE, { waitUntil: "networkidle" });
-  await setTheme("dark");
-  await page.click('.nav button:has-text("Live call")');
-  // The mouth strip is evidence about Wav2Lip, so it has to be the photoreal face — the console
-  // opens on the illustrated one, which is a different claim entirely.
-  await page.waitForSelector(".face-switch", { timeout: 20000 });
-  await page.click('.face-switch button:has-text("Photoreal")');
-  await page.fill('.intake input[autocomplete="name"]', "Dana Whitfield");
-  await page.fill('.intake input[type="email"]', "dana.whitfield@stripe.com");
-  await page.fill('.intake input[autocomplete="organization"]', "Stripe");
-  await page.click('button:has-text("Start the call")');
-
-  const drawing = await page
-    .waitForFunction(
-      () => {
-        const c = document.querySelector(".portrait-mouth");
-        return c !== null && getComputedStyle(c).opacity === "1";
-      },
-      null,
-      { timeout: 120000 },
-    )
-    .then(() => true)
-    .catch(() => false);
-
-  if (!drawing) {
-    console.warn("no mouth frames — skipping mouth.png (is the Wav2Lip checkpoint installed?)");
-  } else {
-    const shots = [];
-    for (let i = 0; i < 5; i += 1) {
-      const pip = await page.$(".rail-face, .meet-hero");
-      shots.push(await pip.screenshot());
-      await page.waitForTimeout(120);
-    }
-    const { createCanvas, loadImage } = await import("node:module").then(() => ({}))
-      .catch(() => ({}));
-    // No canvas dependency: write the frames and stitch them with sharp-free maths in Python
-    // is overkill, so the strip is assembled by the browser itself.
-    const encoded = shots.map((b) => b.toString("base64"));
-    const strip = await page.evaluate(async (frames) => {
-      const images = await Promise.all(
-        frames.map(
-          (data) =>
-            new Promise((resolve) => {
-              const img = new Image();
-              img.onload = () => resolve(img);
-              img.src = `data:image/png;base64,${data}`;
-            }),
-        ),
-      );
-      const canvas = document.createElement("canvas");
-      canvas.width = images[0].width * images.length;
-      canvas.height = images[0].height;
-      const ctx = canvas.getContext("2d");
-      images.forEach((img, i) => ctx.drawImage(img, i * img.width, 0));
-      return canvas.toDataURL("image/png").split(",")[1];
-    }, encoded);
-    writeFileSync(resolve(OUT, "mouth.png"), Buffer.from(strip, "base64"));
-    console.log("wrote docs/img/mouth.png");
-  }
-}
-
 // The offline shot. This is the product's actual claim, so it is captured against a genuinely
 // severed connection rather than mocked: route abort kills the socket and every fetch, then
 // edits are made and shown persisting with a pending count.
@@ -267,7 +210,7 @@ await shot("disconnected", async (p) => {
     await p.waitForSelector(".drawer");
     const notes = await p.$("#notes");
     await notes?.fill(
-      "Edited with the network off. This is saved on this device and will sync on its own.",
+      "Edited with the server unreachable. Held on this device, reconciles on its own.",
     );
     await p.waitForTimeout(500);
     await p.keyboard.press("Escape");

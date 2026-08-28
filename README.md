@@ -12,21 +12,17 @@
 
 <br>
 
-<img src="docs/img/pipeline-dark.png" alt="Rainmaker pipeline board" width="100%">
+<a href="https://youtu.be/qE4K8IMcBew">
+<img src="docs/img/walkthrough-cover.png" alt="Watch it take a call: five minutes, one unedited take" width="100%">
+</a>
 
-</div>
+<br><br>
 
----
-
-## Watch it take a call
+### [Watch it take a call &nbsp;&#9654;](https://youtu.be/qE4K8IMcBew)
 
 Five minutes, one unedited take: it reads a buyer's site, drives its own product on screen,
-quotes $84,096 for 32 H100s, and books an engineer out of a real calendar.
+quotes **$84,096** for 32 H100s, and books an engineer out of a real calendar.
 
-<div align="center">
-<a href="https://youtu.be/qE4K8IMcBew">
-<img src="docs/img/walkthrough-cover.png" alt="Watch the walkthrough" width="100%">
-</a>
 </div>
 
 ---
@@ -44,10 +40,11 @@ checkout in front of you. If the deal genuinely needs a person, it books one out
 calendar. **Nobody is waiting in a queue behind it, because there is nobody behind it.**
 
 **That call is also the product.** Rainmaker sells the agent to other businesses, who configure
-their own and put it on their own website — so the console opens on Nadia, who sells the agent
-itself, and a buyer asking her how it works is watching it work. One command publishes a second
-tenant with nothing in common with us — GPUs by the hour, a rate card, a competitor and a site
-to walk you round — and the same ten steps run on both.
+their own and put it on their own website. One command publishes a tenant with nothing in common
+with us — GPUs by the hour, a rate card, a competitor and a site to walk you round — and the
+console opens on *theirs*, because ours is the weakest demo of the set: it sells the thing you
+are already looking at. Ours is one click away in the same picker, and a buyer asking her how
+Rainmaker works is watching Rainmaker work. The same ten steps run on both.
 
 | Part | What it does |
 |---|---|
@@ -487,12 +484,9 @@ shapes come from spelling, which is a poor guide to pronunciation, but its mouth
 measured amplitude of the audio actually playing — so the half a viewer notices is real. One
 button switches between them and the choice is remembered.
 
-<img src="docs/img/mouth.png" alt="Consecutive frames of an agent mid-sentence" width="100%">
-
-Those are consecutive frames of one sentence. Nothing is warped or interpolated; each mouth was
-generated for the audio playing at that instant.
-
-It is fast enough to sit inside a conversation for three reasons, none of them clever:
+Nothing is warped or interpolated: each mouth is generated for the audio playing at that
+instant, and it is fast enough to sit inside a conversation for three reasons, none of them
+clever:
 
 | | |
 |---|---|

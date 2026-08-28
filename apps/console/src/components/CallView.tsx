@@ -79,15 +79,17 @@ export function CallView({ store }: { store: LocalStore }) {
   const [door, setDoor] = useState<FrontDoor | null>(null);
   // The telemetry drawer. Closed by default: on a call the thing worth looking at is the call.
   const [showSide, setShowSide] = useState(false);
-  // THE PHOTOGRAPH IS WHAT SHE LOOKS LIKE, so it is what a first-time viewer gets. The drawn
-  // rig opened the call for a while and it was the wrong way round: it is the fallback, it is
-  // the cheaper picture, and a reviewer who never touches the switch should not be shown the
-  // weaker of the two things this repository built. The choice, once made, is still theirs.
+  // THE ILLUSTRATION OPENS THE CALL. A photoreal face that is nearly right is worse than a
+  // drawn one that is not trying to be: the portrait sits a few percent off on the jaw and the
+  // neck, and a viewer reads that as something being wrong with the product rather than as a
+  // limitation of a 96x96 model. The drawn rig blinks, saccades, and moves its brows, so it
+  // reads as alive without ever asking to be believed as a person. The photoreal face is a
+  // click away and is where the lip-sync claim is actually demonstrated.
   const [face, setFace] = useState<FaceKind>(() => {
     try {
-      return localStorage.getItem("rainmaker.face") === "drawn" ? "drawn" : "photo";
+      return localStorage.getItem("rainmaker.face") === "photo" ? "photo" : "drawn";
     } catch {
-      return "photo";
+      return "drawn";
     }
   });
   useEffect(() => {
