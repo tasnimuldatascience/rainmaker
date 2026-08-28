@@ -24,7 +24,7 @@ Five minutes, one unedited take: it reads a buyer's site, drives its own product
 quotes $84,096 for 32 H100s, and books an engineer out of a real calendar.
 
 <div align="center">
-<a href="https://www.youtube.com/watch?v=REPLACE_WITH_VIDEO_ID">
+<a href="https://youtu.be/qE4K8IMcBew">
 <img src="docs/img/walkthrough-cover.png" alt="Watch the walkthrough" width="100%">
 </a>
 </div>
