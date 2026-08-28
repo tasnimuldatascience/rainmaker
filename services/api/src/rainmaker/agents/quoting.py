@@ -168,6 +168,20 @@ class Quote:
         plural = self.unit_plural or f"{self.unit_name}s"
         return f"one {self.unit_name}" if self.seats == 1 else f"{self.seats:,} {plural}"
 
+    @property
+    def asked(self) -> str:
+        """The quantity in the BUYER's words: "64 GPUs for two weeks", "40 seats".
+
+        `units` is the same figure converted into the price list's unit, which is the right
+        thing to charge in and the wrong thing to read back. "Sized from the 21,504 GPU-hours
+        you mentioned" was said to somebody who mentioned sixty-four GPUs, and a buyer cannot
+        check a number they never said. The spoken sentence already did this; the panel did not.
+        """
+        if self.quantity and self.duration_label:
+            noun = f" {self.quantity_noun}" if self.quantity_noun else ""
+            return f"{self.quantity:,}{noun} for {self.duration_label}"
+        return self.units
+
     def spoken(self) -> str:
         """The quote as the agent says it out loud.
 
@@ -205,6 +219,7 @@ class Quote:
             "tier": self.tier,
             "seats": self.seats,
             "units": self.units,
+            "asked": self.asked,
             "unit_name": self.unit_name,
             "unit_plural": self.unit_plural or f"{self.unit_name}s",
             "seats_from": self.seats_from,
@@ -282,8 +297,74 @@ def duration_from_conversation(text: str, period: str) -> tuple[float, str] | No
     return None
 
 
+# TENS AND UNITS SEPARATELY, BECAUSE "THIRTY TWO" IS TWO WORDS. A flat table of number words
+# matched the longest single one it could find, so a buyer saying "we need about thirty two
+# H100s" out loud was quoted for THIRTY — a 6% error nobody would catch by ear, on a figure of
+# eighty-four thousand dollars. Digits never had this problem, which is why it survived: it only
+# appears when somebody speaks the number instead of typing it.
+#
+# At module scope because two matchers need them: the one that reads the quantity, and the one
+# that decides whether the buyer already stated it in the unit being charged for.
+_HEARD_ONES = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9,
+}
+_HEARD_TEENS = {
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+}
+_HEARD_TENS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+    "eighty": 80, "ninety": 90,
+}
+_HEARD_WORDS = {**_HEARD_ONES, **_HEARD_TEENS, **_HEARD_TENS, "hundred": 100}
+
+
+def _number_pattern() -> str:
+    """Digits or spoken number words, longest alternative first."""
+    compound = "|".join(f"{ten}[- ]{one}" for ten in _HEARD_TENS for one in _HEARD_ONES)
+    singles = "|".join(sorted(_HEARD_WORDS, key=len, reverse=True))
+    return r"(?:\d{1,3}(?:,\d{3})+|\d{1,7}|" + compound + "|" + singles + r")"
+
+
+def quantity_already_in_rate_units(noun: str, period: str) -> bool:
+    """True when the buyer's number is ALREADY the thing being charged for.
+
+    THE NOUN NEXT TO THE NUMBER IS THE WHOLE SIGNAL. "32 H100s for a month" counts cards, and a
+    month has to be multiplied in before it is a price. "2,000 GPU-hours a month" counts the
+    priced unit itself, and multiplying the month in again quoted two point four million dollars
+    for forty-eight hundred dollars of compute.
+
+    Takes the noun the matcher actually used rather than re-reading the sentence, because
+    "we run training 24 hours a day, we need 32 H100s for a month" contains both nouns and only
+    the matcher knows which number won. Guessing from the raw text divides that quote by seven
+    hundred, which is the worse of the two failures.
+    """
+    if not period or not noun:
+        return False
+    # "GPU-hours" and "hours" both end in the rate's period word; "H100s" and "GPUs" do not.
+    tail = noun.lower().replace("-", " ").split()
+    return bool(tail) and tail[-1].rstrip("s") == period.lower().rstrip("s")
+
+
+def _is_time_noun(noun: str | None) -> bool:
+    """Is this noun a unit of time rather than a thing being bought?"""
+    if not noun:
+        return False
+    return noun.lower().rstrip("s") in RATE_UNIT_HOURS
+
+
 def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | None:
-    """A quantity the buyer stated, or nothing.
+    """The quantity alone, for callers that do not care what it was called."""
+    found = stated_quantity(text, units)
+    return found[0] if found else None
+
+
+def stated_quantity(text: str, units: tuple[str, ...] = ()) -> tuple[int, str] | None:
+    """A quantity the buyer stated and the noun they attached it to, or nothing.
+
+    THE NOUN IS HALF THE ANSWER. "2,000 GPU-hours" and "2,000 GPUs" are the same number and a
+    five-hundred-fold difference in price, and only the noun says which one was meant.
 
     Deliberately narrow. It fires on "we have forty reps" and "about 25 people on the team", and
     stays quiet on "we closed forty deals last quarter" — a number near the wrong noun is worse
@@ -296,33 +377,23 @@ def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | Non
     """
     import re
 
-    # TENS AND UNITS SEPARATELY, BECAUSE "THIRTY TWO" IS TWO WORDS. A flat table of number
-    # words matched the longest single one it could find, so a buyer saying "we need about
-    # thirty two H100s" out loud was quoted for THIRTY — a 6% error nobody would catch by ear,
-    # on a figure of eighty-four thousand dollars. Digits never had this problem, which is why
-    # it survived: it only appears when somebody speaks the number instead of typing it.
-    ones = {
-        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-        "eight": 8, "nine": 9,
-    }
-    teens = {
-        "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
-        "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
-    }
-    tens = {
-        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
-        "eighty": 80, "ninety": 90,
-    }
-    words = {**ones, **teens, **tens, "hundred": 100}
+    ones, tens, words = _HEARD_ONES, _HEARD_TENS, _HEARD_WORDS
+    # LONGEST FIRST, BECAUSE ALTERNATION TAKES THE FIRST MATCH THAT FITS. "GPU" and "GPU-hour"
+    # are both the tenant's words, and a hyphen is a word boundary — so "2,000 GPU-hours"
+    # matched the noun "GPU", which is a card rather than a rate, and the quote was multiplied
+    # by a month it had already been given.
     tenant_words = "|".join(
-        re.escape(word) + "s?" for word in dict.fromkeys(u.lower() for u in units if u)
+        re.escape(word) + "s?"
+        for word in sorted(
+            dict.fromkeys(u.lower() for u in units if u), key=len, reverse=True
+        )
     )
     # THE UNIT IS NOT THE NOUN. `units` is what the price list calls it — "GPU-hour" — and no
     # buyer says that; they say "32 H100s". A tenant whose product has a name of its own puts
     # those words in `AgentSpec.unit_nouns`, and they are matched here alongside the built-in
     # headcount words. Without this, "what does it cost for 32 H100s for a month" matched
     # nothing and the quote fell back to a guessed size band.
-    nouns = r"(?:seats?|licen[cs]es?|users?|reps?|people|staff|salespeople|agents?|of us"
+    nouns = r"(?P<noun>seats?|licen[cs]es?|users?|reps?|people|staff|salespeople|agents?|of us"
     nouns += (f"|{tenant_words})" if tenant_words else ")")
     # Longest first inside each group, and compounds before their own tens word, so "thirty two"
     # is never truncated to "thirty" by an earlier alternative winning.
@@ -350,9 +421,22 @@ def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | Non
         # "a 25-person team", "40 seat plan"
         re.compile(rf"\b{number}[- ](?:person|seat|user|head)\b", re.IGNORECASE),
     )
-    match = next((found for found in (p.search(text) for p in patterns) if found), None)
+    # THE PRODUCT OUTRANKS THE CLOCK. "we run training 24 hours a day, we need 32 H100s for a
+    # month" states two numbers, and the first one is not the order — it is context. Taking the
+    # earliest match quoted twenty-four of something on a sentence that said thirty-two.
+    match = None
+    for pattern in patterns:
+        found = list(pattern.finditer(text))
+        if not found:
+            continue
+        match = next(
+            (m for m in found if not _is_time_noun(m.groupdict().get("noun"))),
+            found[0],
+        )
+        break
     if not match:
         return None
+    noun = (match.groupdict().get("noun") or "").lower().strip()
     raw = match.group("n").lower().replace("-", " ").strip()
     if raw in words:
         seats: int | None = words[raw]
@@ -366,7 +450,7 @@ def seats_from_conversation(text: str, units: tuple[str, ...] = ()) -> int | Non
             seats = None
     if seats is None or not 1 <= seats <= MAX_SEATS:
         return None
-    return seats
+    return seats, noun
 
 
 def pick_tier(spec: AgentSpec, seats: int) -> Tier | None:

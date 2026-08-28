@@ -7,7 +7,7 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-666%20passing-22863a)](#tests)
+[![tests](https://img.shields.io/badge/tests-668%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -520,8 +520,8 @@ console's badge says so. Nothing is faked to cover the gap.
 <img src="docs/img/embed.png" alt="A GPU cloud's own agent, on their own site" width="100%">
 
 That is not our console. It is a GPU cloud's website — different fonts, different colours, nothing
-shared — and the agent in the corner is **theirs**: their name, their voice, their face, their
-disclosure wording, their competitors, and no email server granted. It quotes **$2.40 per
+shared — and the agent in the corner is **theirs**: their voice, their rate card, their
+disclosure wording, their competitors, their tour, and no email server granted. It quotes **$2.40 per
 GPU-hour** because their rate card says $2.40 per GPU-hour, and the word *GPU-hour* comes from
 their pricing rather than from our platform, which called everything a seat until a tenant sold
 something else.
@@ -540,8 +540,8 @@ and a tag manager, and because microphone permission should be scoped to us rath
 
 ```python
 AgentSpec(
-    tenant="tessera", agent_id="alex",
-    name="Mara", company="Tessera Compute", voice="female-warm",
+    tenant="tessera", agent_id="nadia",
+    name="Nadia", company="Tessera Compute", voice="female-warm",
     knowledge=(Fact("H100s by the hour, in clusters of up to 64…", source="positioning"),),
     pricing=(Tier("Reserved", "$2.40 / GPU-hour", unit_amount=240, unit_name="GPU-hour"),),
     unit_nouns=("GPU", "H100", "A100", "card", …),       # what a BUYER calls it, not the price list
@@ -608,10 +608,10 @@ worse than the call it prevented.
 
 ```bash
 npm test                       # 53 tests — syncing, text editing, the call surface
-pytest                         # 613 tests — research, syncing, the API, the live call, the tools
+pytest                         # 615 tests — research, syncing, the API, the live call, the tools
 ```
 
-666 tests in total. None of them load a language model: a test that spends six seconds on
+668 tests in total. None of them load a language model: a test that spends six seconds on
 Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 | Test file | What it protects |

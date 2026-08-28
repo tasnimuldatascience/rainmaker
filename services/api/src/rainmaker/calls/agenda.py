@@ -38,8 +38,9 @@ from ..agents.quoting import (
     build_quote,
     duration_from_conversation,
     money_words,
+    quantity_already_in_rate_units,
     rate_period,
-    seats_from_conversation,
+    stated_quantity,
     unit_words,
 )
 from .intake import Contact
@@ -750,9 +751,10 @@ class Agenda:
         # it is usually mentioned in passing during discovery rather than in answer to a
         # question about seats.
         spec = self.session.spec
-        stated = seats_from_conversation(text, unit_words(spec) if spec else ())
+        stated = stated_quantity(text, unit_words(spec) if spec else ())
+        said_noun = ""
         if stated is not None:
-            self.said_seats = stated
+            self.said_seats, said_noun = stated
 
         # AND HOW LONG FOR, WHEN THE UNIT IS A RATE. "32 H100s for a month" states the quantity
         # and the duration in one breath, and a GPU-hour is only a number once both are known.
@@ -761,7 +763,10 @@ class Agenda:
         period = rate_period(spec.pricing[0].unit_name) if spec and spec.pricing else ""
         if period:
             heard = duration_from_conversation(text, period)
-            if heard is not None:
+            # UNLESS THEY ALREADY DID THE MULTIPLICATION. "2,000 GPU-hours a month" states the
+            # priced unit and the month; the month is when, not how many. Applying it anyway
+            # quoted 2.4 million dollars for 4,800 dollars of compute.
+            if heard is not None and not quantity_already_in_rate_units(said_noun, period):
                 self.said_duration = heard
 
         # An explicit ask outranks the plan. Someone who asks the price during discovery is

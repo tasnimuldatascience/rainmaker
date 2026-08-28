@@ -169,6 +169,8 @@ export interface Quote {
   seats: number;
   /** The quantity in the tenant's own words: "40 seats", "2,000 GPU-hours". */
   units: string;
+  /** The quantity in the BUYER's words ("64 GPUs for two weeks"), not the price list's. */
+  asked?: string;
   unit_name: string;
   unit_plural: string;
   seats_from: string;

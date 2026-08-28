@@ -237,16 +237,31 @@ first.
 
 ---
 
+## Decided against, and what it costs
+
+These are trade-offs rather than gaps: each was reachable, each was measured, and the price of
+declining it is stated in the product rather than hidden.
+
+- **GPU synthesis.** `onnxruntime-gpu` would take Kokoro's ~340ms fixed cost down substantially
+  and is the obvious next step for latency. It is also another dependency, another install path
+  and another way for a fresh clone to fail, and the rule here is that a clone runs. **The price:
+  the turn budget is missed by roughly 100ms on typed input, and the console displays that.**
+- **Server-side transcription.** faster-whisper would keep audio on the machine, and would
+  compete with Kokoro for the same cores on the one path where latency is visible. **The price:
+  Chrome sends microphone audio to Google, which the console says out loud; typing does not.**
+
 ## Not built
 
 - **Auth.** Actor identity is a per-browser id. A real deployment needs workspace membership
-  enforced at the relay, which is the only place it can be enforced.
+  enforced at the relay, which is the only place it can be enforced — a client that decides
+  whether it is allowed to write has decided nothing.
 - **Log compaction.** The op log grows forever. A production system needs periodic snapshotting
-  with tombstone GC — which for RGA means proving no live insert anchors to a collected char.
+  with tombstone GC — which for RGA means proving no live insert anchors to a collected
+  character, and getting that wrong resurrects deleted text on one replica only.
 - **Real WebRTC media.** The conversation is real and runs over a WebSocket, with audio sent as
-  base64 WAV per clause. A production deployment wants LiveKit or equivalent for jitter buffering,
-  reconnects and echo cancellation; none of that is here.
-- **GPU synthesis.** See above. The single change most likely to bring the turn inside budget.
+  base64 WAV per clause. That is fine on a local network and wrong on a lossy one: a production
+  deployment wants LiveKit or equivalent for jitter buffering, reconnects and echo cancellation,
+  none of which is here.
 - **A commercially licensed talking head.** The face lip-syncs, on the local GPU, via Wav2Lip —
   whose weights are academic and personal use only. Every other dependency here is permissive.
   A hosted provider behind the same interface is the commercial path and is not wired up.

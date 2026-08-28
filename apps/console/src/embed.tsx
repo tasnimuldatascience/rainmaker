@@ -19,7 +19,7 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import { Portrait } from "./components/Portrait";
+import { Avatar } from "./components/Avatar";
 import type { CallState, FrontDoor, Intake } from "./lib/call";
 import { frontDoor } from "./lib/call";
 import { LiveCall } from "./lib/call";
@@ -103,13 +103,17 @@ function Widget() {
       </header>
 
       <div className="w-face" data-live={live}>
-        <Portrait
-          level={() => call.level()}
-          mouth={() => call.mouthFrame()}
+        {/* THE ILLUSTRATION, AS IN THE CONSOLE. A widget is 380px wide, so the face is small and
+            in a stranger's peripheral vision on somebody else's marketing site — which is the
+            worst possible place for a photoreal face that is a few percent wrong. The drawn rig
+            blinks, drifts and opens its mouth on measured amplitude, and it is honest about
+            being a drawing. */}
+        <Avatar
+          speech={state.caption}
           speaking={state.speaking}
           listening={live && !state.speaking}
+          level={() => call.level()}
           fill
-          src={state.agent?.portrait ?? door?.portrait ?? "/agent/nadia.jpg"}
         />
       </div>
       {state.caption && <div className="w-caption">{state.caption}</div>}

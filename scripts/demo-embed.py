@@ -51,7 +51,7 @@ from rainmaker.agents.spec import (  # noqa: E402
 )
 from rainmaker.agents.store import AgentStore  # noqa: E402
 
-TENANT, AGENT = "tessera", "alex"
+TENANT, AGENT = "tessera", "nadia"
 
 #: Where their own tour opens. Their site, not ours — the whole point of the guide step.
 # Same override as `agents.store.CONSOLE`, for the same reason: vite takes the next free
@@ -65,7 +65,7 @@ def tessera() -> AgentSpec:
     return AgentSpec(
         tenant=TENANT,
         agent_id=AGENT,
-        name="Mara",
+        name="Nadia",
         company="Tessera Compute",
         persona="a straight-talking solutions engineer who would rather be exact than keen",
         objective=(
@@ -75,14 +75,15 @@ def tessera() -> AgentSpec:
         ),
         # A DIFFERENT VOICE FROM OURS, DELIBERATELY. Two tenants that sound the same are two
         # tenants a listener cannot tell apart, and the voice is the first thing a buyer on a
-        # call notices. Ours is US English; hers is British.
+        # call notices. Ours is `female-clear`; theirs is `female-warm`.
         #
-        # Her own face, not a borrowed one. Two agents wearing one photograph is a demo of a
-        # template rather than of multi-tenancy, and the face is the first thing a buyer
-        # notices. `scripts/fetch-face.py` picked it out of the same Apache-2.0 set of
-        # synthetic portraits Nadia came from.
+        # THE SAME PERSONA ON BOTH, WHICH IS A CASTING DECISION AND NOT A LIMITATION. `portrait`
+        # is a field, the lip-sync engine caches a crop per face, and a test asserts a second
+        # tenant never answers in the first one's face. Pointing two tenants at one persona is
+        # what the walkthrough shows, so it is what the repository ships; `fetch-face.py` mints
+        # another from the same Apache-2.0 set whenever a tenant wants one.
         voice="female-warm",
-        portrait="/agent/mara.jpg",
+        portrait="/agent/nadia.jpg",
         knowledge=(
             Fact(
                 "Tessera rents H100 and A100 GPUs by the hour, in clusters of up to 64, with "

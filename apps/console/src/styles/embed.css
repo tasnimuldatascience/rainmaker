@@ -40,6 +40,8 @@
   background: linear-gradient(170deg, var(--surface-3), var(--surface-1));
 }
 .w-face .portrait { inline-size: 100%; block-size: 100%; border-radius: 0; }
+/* The drawn face is an SVG rather than an <img>, and it fills the box the same way. */
+.w-face svg { inline-size: 100%; block-size: 100%; display: block; }
 /* UNDER HER FACE, NOT ACROSS IT. Overlaid on the lower third of the portrait, the caption sat
    exactly where the mouth is — and the mouth is the part this whole avatar exists to move. It
    was only ever visible because the previous portrait was framed further out. */

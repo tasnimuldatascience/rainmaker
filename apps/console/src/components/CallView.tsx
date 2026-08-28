@@ -956,7 +956,7 @@ function Stage({
         <p className="sub">
           {quote.assumed
             ? "Sized from what she found about your business — tell her the real number and it updates."
-            : `Sized from the ${quote.units} you mentioned.`}
+            : `Sized from the ${quote.asked ?? quote.units} you mentioned.`}
         </p>
         <div className="quote">
           <div className="quote-total">

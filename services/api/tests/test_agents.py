@@ -654,6 +654,52 @@ class TestARateUnitIsQuantityTimesTime:
         assert quote.total == 32 * 730 * 360
         assert quote.money(quote.total) == "$84,096"
 
+    def test_a_quantity_already_in_rate_units_is_not_multiplied_again(self):
+        """The inverse of the bug above, introduced by its fix.
+
+        "2,000 GPU-hours a month" states the priced unit and a month; the month is WHEN, not
+        HOW MANY. Multiplying it in again quoted two point four million dollars for forty-eight
+        hundred dollars of compute — a five-hundred-fold error, read out on a rate card the
+        buyer is looking at. The noun next to the number is the whole signal: "H100s" is a
+        thing, "GPU-hours" is the rate.
+        """
+        from rainmaker.agents.quoting import (
+            build_quote,
+            quantity_already_in_rate_units,
+            stated_quantity,
+            unit_words,
+        )
+
+        spec = self.gpu_spec()
+        said = stated_quantity("what does it cost for 2,000 GPU-hours a month?", unit_words(spec))
+        assert said is not None
+        count, noun = said
+        assert count == 2_000
+        assert quantity_already_in_rate_units(noun, "hour") is True
+
+        # The agenda drops the duration in this case, so the quote is the number they said.
+        quote = build_quote(spec, said_seats=count, said_duration=None)
+        assert quote is not None
+        assert quote.seats == 2_000
+        assert quote.money(quote.total) == "$7,200"
+
+    def test_the_clock_does_not_outrank_the_product(self):
+        """"we run training 24 hours a day, we need 32 H100s for a month" states two numbers.
+
+        The matcher took the earliest and quoted TWENTY-FOUR of something, on a sentence that
+        said thirty-two. A number sitting next to a unit of time is context, not an order.
+        """
+        from rainmaker.agents.quoting import stated_quantity, unit_words
+
+        said = stated_quantity(
+            "we run training 24 hours a day, we need 32 H100s for a month",
+            unit_words(self.gpu_spec()),
+        )
+        assert said is not None
+        count, noun = said
+        assert count == 32, f"took the clock, not the product: {count} {noun}"
+        assert noun.lower() == "h100s"
+
     def test_it_says_the_number_back_the_way_the_buyer_asked_for_it(self):
         """"For 23,360 GPU-hours" is the same arithmetic and a different question: the buyer
         asked for 32 cards for a month and cannot check a figure they never said."""

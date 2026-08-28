@@ -5,7 +5,13 @@
  * instead of silently going stale. Both themes, and the disconnected state — which is a
  * claim nobody believes without a picture.
  *
- *   node scripts/screenshots.mjs [--base http://127.0.0.1:5174]
+ *   node scripts/screenshots.mjs [--base http://127.0.0.1:5174] [--only call]
+ *
+ * RAISE THE CALL RATE LIMIT FIRST. Admission counts calls per VISITOR, a visitor is an IP, and
+ * every run comes from 127.0.0.1 — so the default of six an hour is spent by the fifth shot and
+ * the rest silently sit in the lobby with no error on the page. Start the API with:
+ *
+ *   RAINMAKER_CALLS_PER_VISITOR_HOUR=200
  */
 
 import { chromium } from "playwright";
@@ -176,7 +182,11 @@ await shot("quote", async (p) => {
   await setTheme("dark");
   await startCall(p);
   await greeted(p);
-  await say(p, "how much would it be for 40 people?");
+  // ASK IT THE WAY THIS TENANT'S BUYERS ASK IT. "40 people" is a seats question, and the
+  // console opens on a GPU cloud -- so the card answered "sized from the 40 GPU-hours you
+  // mentioned" about a sentence that said people. This also exercises the half of the quote
+  // that is easy to get wrong: a rate unit multiplied by a stated duration.
+  await say(p, "how much for 64 GPUs for two weeks?");
   await p.waitForSelector(".quote-figure", { timeout: 120000 });
 }, 400);
 
@@ -184,11 +194,57 @@ await shot("checkout", async (p) => {
   await setTheme("dark");
   await startCall(p);
   await greeted(p);
-  await say(p, "how much would it be for 40 people?");
+  // ASK IT THE WAY THIS TENANT'S BUYERS ASK IT. "40 people" is a seats question, and the
+  // console opens on a GPU cloud -- so the card answered "sized from the 40 GPU-hours you
+  // mentioned" about a sentence that said people. This also exercises the half of the quote
+  // that is easy to get wrong: a rate unit multiplied by a stated duration.
+  await say(p, "how much for 64 GPUs for two weeks?");
   await p.waitForSelector(".quote-figure", { timeout: 120000 });
   await say(p, "great, sign me up");
   await p.waitForSelector('a:has-text("Open the checkout")', { timeout: 120000 });
 }, 400);
+
+// A GPU CLOUD'S OWN SITE, with their agent in the corner. Not our console: a different page, a
+// different stylesheet, and the widget reached through the iframe boundary it actually ships
+// behind — which is the point of the picture and the reason it is driven rather than mocked.
+if (wanted("embed")) {
+  // ITS OWN CONTEXT, BECAUSE THE SERVICE WORKER OWNS THIS ORIGIN. The console registers a
+  // worker that answers navigations with the app shell, so once any console shot has run, the
+  // customer's page is served OUR page and the launcher never exists. A fresh context has no
+  // worker and no cache, which is also what a first-time visitor to their site actually gets.
+  const shopCtx = await browser.newContext({
+    viewport: { width: 1500, height: 980 },
+    deviceScaleFactor: 2,
+  });
+  const page = await shopCtx.newPage();
+
+  await page.goto(`${BASE}/demo/tessera.html`, { waitUntil: "networkidle" });
+  await page.click("#rainmaker-embed button");
+  const w = page.frameLocator("#rainmaker-embed iframe");
+
+  await w.locator('input[autocomplete="name"]').fill("Priya Raman");
+  await w.locator('input[type="email"]').fill("priya@anthology.ai");
+  await w.locator('input[autocomplete="organization"]').fill("Anthology");
+  await w.locator("button.w-go").click();
+
+  // Her disclosure, the holding line, then the greeting -- the same three turns the console
+  // shot waits for, counted through the frame.
+  await w.locator(".w-turn").nth(2).waitFor({ timeout: 120000 });
+
+  await w.locator(".w-bar input").fill("what does it cost for about 2,000 GPU hours a month?");
+  await w.locator("button.w-send").click();
+
+  // Wait for the priced answer rather than for a duration: the number is the claim, and a
+  // fixed sleep photographs whatever happened to be on screen.
+  await w
+    .locator(".w-turn", { hasText: /per GPU-hour|GPU-hour/ })
+    .last()
+    .waitFor({ timeout: 120000 });
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: resolve(OUT, "embed.png") });
+  console.log("wrote docs/img/embed.png");
+  await shopCtx.close();
+}
 
 // The offline shot. This is the product's actual claim, so it is captured against a genuinely
 // severed connection rather than mocked: route abort kills the socket and every fetch, then
