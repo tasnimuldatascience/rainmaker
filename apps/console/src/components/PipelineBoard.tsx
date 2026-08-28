@@ -3,7 +3,7 @@
  *
  * Drag-and-drop is the HTML5 native API rather than a library. dnd-kit is ~30kb and the
  * interaction here is one drag type onto one drop target type; the native API covers that in
- * a few handlers and keeps the offline bundle small, which matters for an app whose whole
+ * a few handlers and keeps the cached bundle small, which matters for an app whose whole
  * premise is working on a bad connection.
  *
  * The stage change on drop is a single `setField` — a local CRDT op that lands instantly and

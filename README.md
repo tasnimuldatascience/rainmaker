@@ -18,6 +18,19 @@
 
 ---
 
+## Watch it take a call
+
+Five minutes, one unedited take: it reads a buyer's site, drives its own product on screen,
+quotes $84,096 for 32 H100s, and books an engineer out of a real calendar.
+
+<div align="center">
+<a href="https://www.youtube.com/watch?v=REPLACE_WITH_VIDEO_ID">
+<img src="docs/img/walkthrough-cover.png" alt="Watch the walkthrough" width="100%">
+</a>
+</div>
+
+---
+
 ## What is this?
 
 **A buyer lands on your website at eleven at night and nobody is awake.** Today they fill in a
@@ -91,7 +104,7 @@ npm run dev            # http://localhost:5173
 ```
 
 Open it, give her a work email, and talk. **That is the demo** — everything in the table above
-happens on that call, with no key, no account and nothing paid for.
+happens on that call.
 
 ```bash
 python scripts/demo-embed.py    # optional: publish a second tenant, and put their agent on
@@ -109,7 +122,7 @@ real thing:
 
 ```bash
 pip install -e "services/api[voice]"      # the voice: ~40MB of wheels
-python scripts/fetch-models.py            # its weights: 330MB, Apache-2.0, no account
+python scripts/fetch-models.py            # its weights: 330MB, Apache-2.0
 
 pip install -e "services/api[brain]"      # the model: torch, ~2.5GB
 # Qwen2.5-1.5B-Instruct downloads itself on first start
@@ -148,16 +161,17 @@ drives a live browser to pages on that host.
 
 ---
 
-## The dashboard works with no internet
+## The board is local-first
 
-Not "shows you a cached page". **Turn off your wifi, reload the browser tab, and everything still
-works.** Edits save. When the connection returns, they sync.
+Not "shows you a cached page". **Every edit is written to the device first and reconciled
+afterwards**, so the board never blocks on a round trip and never loses an edit to a
+connection that dropped mid-save.
 
 <div align="center">
-<img src="docs/img/offline.png" alt="Rainmaker running with the network disconnected" width="100%">
+<img src="docs/img/disconnected.png" alt="Rainmaker with the connection severed, still working" width="100%">
 <br>
-<sub>Taken with the network genuinely disconnected, then a full page reload. The badge shows
-<b>83 edits saved on the device</b>, waiting to sync.</sub>
+<sub>Taken with the connection severed, then a full page reload. The badge shows
+<b>83 edits held on the device</b>, waiting to reconcile.</sub>
 </div>
 
 This is a property of the pipeline board, not a pitch: a rep on a train should be able to work
@@ -172,7 +186,8 @@ Rainmaker never asks. Every edit is saved on your device immediately, and the ch
 send later. The server's only job is to collect changes and pass them on — **it never decides who
 wins.**
 
-That raises an obvious problem: what if two people edit the same deal while both are offline?
+That raises an obvious problem: what if two people edit the same deal while neither can
+reach the server?
 
 The answer is a **CRDT** — a way of storing data where changes can arrive in any order, or twice,
 or years late, and everyone still ends up with the same result.
@@ -566,7 +581,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 | `diff.test.ts` | Typing in a shared note produces the right text, including emoji and accents |
 | `test_research.py` | The research agent cannot invent facts, wander onto other websites, or read more pages than allowed |
 | `test_sync.py` | Duplicate changes, saving before broadcasting, slow clients, and TypeScript ↔ Python agreement |
-| `test_app.py` | **The offline flush endpoint.** Reconnect, retry, deduplicate, and never half-apply a batch |
+| `test_app.py` | **The reconnect flush endpoint.** Retry, deduplicate, and never half-apply a batch |
 | `test_pipeline.py` | That a call cannot start without the AI disclosure, that every stage of the turn is measured, and that a price the model invented never reaches the speaker |
 | `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
 | `test_agenda.py` | That she researches before she greets, that the page she opens is ours and not theirs, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
@@ -581,7 +596,7 @@ Qwen to check that a WebSocket sends JSON is testing Qwen.
 
 ### The bug the API tests found immediately
 
-`/api/sync/append` — the path a console uses to flush its offline queue — **could not accept a
+`/api/sync/append` — the path a console uses to flush its queued edits — **could not accept a
 request body at all.** Every POST returned:
 
 ```json
@@ -632,7 +647,7 @@ matched.
 ## Project layout
 
 ```
-packages/crdt          the offline-syncing data structures     (TypeScript)
+packages/crdt          the local-first sync primitives          (TypeScript)
 apps/console           the dashboard and the call surface       (React)
 services/api
   calls/

@@ -5,13 +5,13 @@
  * asking, whether their work is safe — and the honest answer has three states, not two:
  *
  *   live      everything is on the server
- *   offline   nothing is being lost; N edits are queued locally and will send
+ *   local     nothing is being lost; N edits are held on the device and will send
  *   syncing   catching up right now
  *
- * The offline state is deliberately NOT styled as an error. It is a normal, supported mode of
+ * That state is deliberately NOT styled as an error. It is a normal, supported mode of
  * operation, and a red alarm would train reps to distrust a system that is working correctly.
  * It is amber and it states the queue depth, because "3 changes waiting" is reassuring in a
- * way that "offline" alone is not.
+ * way that a bare connection status is not.
  */
 
 import type { StoreStatus } from "../lib/store";
@@ -20,7 +20,7 @@ const LABEL: Record<StoreStatus["connection"], string> = {
   live: "Synced",
   syncing: "Syncing",
   connecting: "Connecting",
-  offline: "Offline",
+  offline: "Working locally",
 };
 
 export function SyncBadge({ status }: { status: StoreStatus }) {

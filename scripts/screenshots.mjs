@@ -2,8 +2,8 @@
  * Capture console screenshots for the README.
  *
  * Scripted rather than hand-captured so the images can be regenerated after a UI change
- * instead of silently going stale. Both themes, and the offline state — which is the whole
- * point of the product and therefore the shot that has to be in the README.
+ * instead of silently going stale. Both themes, and the disconnected state — which is a
+ * claim nobody believes without a picture.
  *
  *   node scripts/screenshots.mjs [--base http://127.0.0.1:5174]
  */
@@ -66,22 +66,15 @@ async function startCall(p) {
 /**
  * Wait until she has said three things: the disclosure, the holding line, and the greeting.
  *
- * The transcript lives in the details drawer now, so the turns are only in the DOM when it is
- * open. Waiting on the caption instead would race the clause stream; waiting on the drawer's
- * turns is the same signal it always was, one click further in.
+ * The conversation rail carries the turns, so they are in the DOM without opening anything.
+ * Waiting on the caption instead would race the clause stream.
  */
 const greeted = async (p) => {
-  await openDetails(p);
+  // The rail carries the conversation, so the turns are in the DOM without opening anything.
   await p.waitForFunction(() => document.querySelectorAll(".turn").length >= 3, null, {
     timeout: 120000,
   });
 };
-
-/** The telemetry drawer, opened once. It is closed by default on a call. */
-async function openDetails(p) {
-  const open = await p.$('.meet-round[data-on="true"]:has-text("Details")');
-  if (!open) await p.click('.meet-round:has-text("Details")');
-}
 
 const say = async (p, text) => {
   await p.fill(".meet-input input", text);
@@ -139,7 +132,7 @@ await shot("call", async (p) => {
   await p
     .waitForFunction(
       () => {
-        const el = document.querySelector(".meet .portrait");
+        const el = document.querySelector(".meet .portrait, .meet [data-speaking]");
         if (el?.getAttribute("data-speaking") !== "true") return false;
         return Number(getComputedStyle(el).getPropertyValue("--loud")) > 0.2;
       },
@@ -222,7 +215,7 @@ await shot("checkout", async (p) => {
   } else {
     const shots = [];
     for (let i = 0; i < 5; i += 1) {
-      const pip = await page.$(".meet-self, .meet-hero");
+      const pip = await page.$(".rail-face, .meet-hero");
       shots.push(await pip.screenshot());
       await page.waitForTimeout(120);
     }
@@ -257,7 +250,7 @@ await shot("checkout", async (p) => {
 // The offline shot. This is the product's actual claim, so it is captured against a genuinely
 // severed connection rather than mocked: route abort kills the socket and every fetch, then
 // edits are made and shown persisting with a pending count.
-await shot("offline", async (p) => {
+await shot("disconnected", async (p) => {
   await setTheme("dark");
   // Wait for the service worker to control the page BEFORE severing the connection --
   // otherwise the reload has no cached shell to boot from and the browser shows its own

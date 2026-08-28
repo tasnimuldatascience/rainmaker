@@ -89,8 +89,9 @@ class ClientSpeechToText(SpeechToText):
     actually latency-critical. Running faster-whisper server-side would compete with Kokoro for
     the same cores and make the reply slower to arrive than the transcription was to produce.
 
-    The honest cost, stated because the rest of this project is offline-first: Chrome's
-    implementation sends audio to Google. Typing is the offline path, and the console says so.
+    The honest cost, stated because the rest of this project is local-first: Chrome's
+    implementation sends audio to Google. Typing is the path that does not, and the console
+    says so.
 
     This adapter exists so the pipeline's contract does not bend around that. Text arrives over
     the WebSocket as `(text, final)` and is replayed here as the stream the pipeline expects.

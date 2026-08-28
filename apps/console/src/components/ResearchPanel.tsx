@@ -283,7 +283,7 @@ function Result({ data, store }: { data: Enrichment; store: LocalStore }) {
           {attached ? "Attached to deal ✓" : "Attach intent score to matching deal"}
         </button>
         <span className="tiny muted">
-          Writes locally as a CRDT op — works offline like every other edit.
+          Writes locally as a CRDT op — reconciles later like every other edit.
         </span>
       </div>
     </div>

@@ -8,7 +8,7 @@ Four surfaces, one process:
     /api/calls        the live call: WS for the conversation, GET for which engines are loaded
 
 The console never talks to /api/deals to WRITE. Every mutation goes through the op log so the
-offline path and the online path are the same path — a write that only works when connected is
+disconnected path and the connected path are the same path — a write that only works when connected is
 a write the local-first design would have to special-case, and special cases are where
 divergence lives.
 """
@@ -177,7 +177,7 @@ async def lifespan(app: FastAPI):
 
 
 class AppendRequest(BaseModel):
-    """The body of an offline flush.
+    """The body of a reconnect flush.
 
     AT MODULE SCOPE, AND IT HAS TO BE. This was declared inside `create_app`, and with
     `from __future__ import annotations` at the top of this file every annotation is a string that
@@ -208,7 +208,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Rainmaker",
         version="0.1.0",
-        description="AI sales agent platform with an offline-first rep console.",
+        description="AI sales agent platform with a local-first rep console.",
         lifespan=lifespan,
     )
     # The console is served from a different origin in development (Vite on :5173).
@@ -245,9 +245,9 @@ def create_app() -> FastAPI:
     # ─────────────────────────────────────────────────────────── sync
     @app.post("/api/sync/append")
     async def append(req: AppendRequest) -> dict[str, Any]:
-        """The offline flush path.
+        """The reconnect flush path.
 
-        A console that was offline posts its whole queue here on reconnect. Deduplication is
+        A console that lost the server posts its whole queue here on reconnect. Deduplication is
         the op log's job, so a client that is unsure whether an earlier flush landed should
         simply send it again -- which is exactly what it does.
         """

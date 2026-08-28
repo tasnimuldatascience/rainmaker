@@ -18,7 +18,7 @@
  * character while holding the real audio in its hand — the single most obvious tell that the
  * animation was decorative.
  *
- * WHAT THE MICROPHONE COSTS, stated plainly because the rest of this product is offline-first:
+ * WHAT THE MICROPHONE COSTS, stated plainly because the rest of this product is local-first:
  * `SpeechRecognition` in Chrome sends audio to Google. Typing works with the network off and
  * the whole agent — model and voice — runs locally either way. The console says so next to the
  * button rather than in a footnote.
@@ -663,7 +663,7 @@ export class LiveCall {
         this.set({
           error:
             event.error === "network"
-              ? "Speech recognition needs a connection. Typing works offline."
+              ? "Speech recognition needs a connection. Typing does not."
               : `Microphone: ${event.error}`,
         });
       }

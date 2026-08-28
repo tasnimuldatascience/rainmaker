@@ -6,7 +6,8 @@ WHY THE OP LOG AND NOT A TABLE. Everything a rep sees is materialised from an ap
 CRDT operations, and the console holds its own replica. If this server wrote to a `deals` table
 the rep's laptop would never hear about it: the two views would diverge the moment the agent
 touched a deal the rep also had open. Writing ops means an outcome recorded here reaches every
-connected console the same way a rep's own edit does, and merges with edits made offline while
+connected console the same way a rep's own edit does, and merges with edits made on a
+disconnected device while
 the call was happening.
 
 WHICH IS THE POINT WORTH MAKING ABOUT MCP HERE. Exposing the CRM as a tool server is not a
@@ -53,7 +54,7 @@ server = MCPServer(
     "rainmaker-crm",
     instructions=(
         "Record call outcomes into the sales pipeline. Writes are CRDT operations, so they "
-        "merge with edits reps made offline rather than overwriting them."
+        "merge with edits reps made on their own device rather than overwriting them."
     ),
 )
 

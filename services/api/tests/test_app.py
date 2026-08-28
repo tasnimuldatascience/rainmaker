@@ -1,7 +1,7 @@
-"""The HTTP API, which was at zero percent — including the offline flush path.
+"""The HTTP API, which was at zero percent — including the reconnect flush path.
 
 THE PRODUCT CLAIM IS "IT KEEPS WORKING WHEN THE INTERNET DOES NOT". Everything downstream of that
-rests on one endpoint: a console that has been offline reconnects and posts its entire queue to
+rests on one endpoint: a console that lost the server reconnects and posts its entire queue to
 `/api/sync/append`. The interesting case is not the happy one. It is the console that flushed,
 lost the response, and flushes again — because it cannot know whether the first attempt landed.
 
@@ -161,7 +161,7 @@ class TestDeals:
         assert client.get("/api/deals").status_code == 200
 
     def test_an_appended_deal_appears_on_the_board(self, client: TestClient):
-        """The whole round trip: an op posted by an offline console becomes a row a salesperson
+        """The whole round trip: an op posted by a reconnecting console becomes a row a salesperson
         sees. Every layer in between is exercised by this one assertion."""
         client.post("/api/sync/append", json={
             "ops": [op("d-create", entity="deal-1", op_type="set",

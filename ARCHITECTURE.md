@@ -45,7 +45,7 @@ apps/console/            React 18. Renders a replica; never fetches to read.
   lib/store.ts           IndexedDB + outbox + reconnect + WS/HTTP transport
   lib/useStore.ts        useSyncExternalStore bindings
   components/            board, drawer, research, call, sync badge
-  public/sw.js           app shell cache — the thing that makes a cold offline start work
+  public/sw.js           app shell cache — the thing that makes a cold start work unconnected
 
 services/api/
   research/              fetch (policy) → extract (deterministic) → schema (provenance)
@@ -75,8 +75,8 @@ console needs is a register, a set, or a text sequence.
 
 ### The server does not merge
 
-**Chosen because** it is what makes offline the *same* code path as online. If the server
-merged, the console would need a second reconciliation path for the offline case, and a special
+**Chosen because** it makes a disconnected client the *same* code path as a connected one. If
+the server merged, the console would need a second reconciliation path for that case, and a special
 case is where divergence lives. It also keeps the server small enough to reason about: append,
 dedup, order, relay.
 
@@ -148,7 +148,7 @@ rather than hiding it.
 fits everything else about this design, and it would compete with Kokoro for the same cores on
 the one path where latency is visible. The browser's recogniser is free, streams partials, and
 leaves the CPU to the two models that need it. The cost is real and stated in the console:
-Chrome sends microphone audio to Google. Typing is the offline path.
+Chrome sends microphone audio to Google. Typing is the path that does not.
 
 ### The model may not state a figure, and it is a filter rather than a prompt
 
@@ -216,8 +216,8 @@ guarantee keeping the model honest silently did not apply. Now a `model_validato
 **4. Leaked per-run state.** `PolitePool.skipped` accumulated across calls, so researching the
 same domain twice reported every skip twice and the agent was not idempotent.
 
-**5. No offline cold start.** The screenshot script tried to reload with the network severed and
-got `ERR_INTERNET_DISCONNECTED` — proving the app could not boot offline despite all the local
+**5. No cold start when disconnected.** The screenshot script tried to reload with the network
+severed and got `ERR_INTERNET_DISCONNECTED` — proving the app could not boot despite all the local
 data being present. Fixed with a service worker; the shot is now in the README as evidence.
 
 **6. A price the model invented, said out loud.** Found by driving a real call rather than by a

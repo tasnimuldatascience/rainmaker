@@ -1127,7 +1127,7 @@ class Agenda:
         """Where to take them next on the product tour.
 
         Goes where the QUESTION went. A stop declares what it answers, so "does it work
-        offline" lands on the page that shows that rather than on stop three of five. A tour
+        disconnected" lands on the page that shows that rather than on stop three of five. A tour
         that always runs in order is a slide deck with extra steps.
         """
         spec = self.session.spec

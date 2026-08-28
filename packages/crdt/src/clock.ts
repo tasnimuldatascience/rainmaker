@@ -1,7 +1,7 @@
 /**
  * Hybrid Logical Clocks (Kulkarni et al., 2014).
  *
- * WHY NOT WALL CLOCK. A local-first console writes while offline, so two replicas routinely
+ * WHY NOT WALL CLOCK. A local-first console writes while disconnected, so two replicas routinely
  * produce edits with no communication between them. Last-write-wins on `Date.now()` means the
  * winner is decided by whichever laptop's clock drifted further ahead — and clock skew on
  * consumer machines is regularly seconds, sometimes minutes. A rep whose clock runs fast wins
@@ -101,7 +101,7 @@ export class HybridClock {
  * Total order over HLCs. Returns <0, 0, >0.
  *
  * The actor tiebreak is what makes this a TOTAL order rather than a partial one. Two replicas
- * can produce identical (wall, counter) pairs while offline; without a deterministic third
+ * can produce identical (wall, counter) pairs while disconnected; without a deterministic third
  * key they would disagree about which won, and LWW would converge to different values on
  * different machines — the exact failure a CRDT exists to prevent.
  */
