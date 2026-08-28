@@ -7,7 +7,6 @@
 [![ci](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/tasnimuldatascience/rainmaker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white)](services/api/pyproject.toml)
 [![typescript](https://img.shields.io/badge/typescript-5.6-3178c6?logo=typescript&logoColor=white)](packages/crdt)
-[![tests](https://img.shields.io/badge/tests-745%20passing-22863a)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-22863a)](LICENSE)
 
 <br>
@@ -220,7 +219,8 @@ the data:
 
 Every change carries a **hybrid logical clock** rather than a wall clock, because two machines
 routinely produce the same millisecond and a wall clock that steps backwards would silently
-reorder history.
+reorder history. The merge rules are implemented twice — TypeScript in the console, Python on the
+server — and `ARCHITECTURE.md` covers how the two are kept from drifting apart.
 
 <div align="center">
 <img src="docs/img/disconnected.png" alt="The console with the connection severed, still working" width="100%">
@@ -228,27 +228,6 @@ reorder history.
 <sub>Taken with the connection severed, then a full page reload. The badge reads
 <b>83 edits held on the device</b>, waiting to reconcile.</sub>
 </div>
-
-### Proving the merge is actually correct
-
-You cannot test convergence with a handful of examples, because the bugs live in orderings
-nobody thinks to write down.
-
-So the tests generate **300 random sequences of edits**, deliver them to two replicas in
-different orders, and assert both end up identical:
-
-```
-For any set of edits, delivered in any two orders:
-    replica A's result  ==  replica B's result
-```
-
-That found two bugs reading the code had missed. Both were the same shape:
-
-> **A deletion arriving before the thing it deletes.** Delete a character, and if that deletion
-> reaches the other replica before the original typing does, the character comes back — on one
-> replica only.
-
-The failing case was two operations long. Nobody would have written that test by hand.
 
 ### Who is allowed to write
 
@@ -272,27 +251,6 @@ edit, it decides which edit wins.
 Enrolment is deliberately open: there is no sign-in screen, so `POST /api/sync/token` grants a
 token to whoever asks. That is one handler to put an identity provider in front of, and it is the
 cheap half; the enforcement underneath it is the half that is expensive to add later.
-
-### And the two implementations agree
-
-The merge exists twice — TypeScript in the console, Python on the server — because both have to
-be able to answer "what does this deal look like now". Two implementations of a merge rule is
-two chances to be subtly different, and a divergence would show up as a deal that reads one way
-in the browser and another way in the API.
-
-So CI generates fixtures from the TypeScript implementation, fails if they are not committed and
-current, and runs the Python implementation against them:
-
-```bash
-npx tsx packages/crdt/scripts/fixtures.ts   # seven ordering cases, from the TS replica
-git diff --exit-code services/api/tests/fixtures
-pytest services/api -q -k Agrees            # Python must reach the same state
-```
-
-Change one side's merge without the other and the build goes red on the diff, before anybody
-reads a wrong number off a board.
-
----
 
 ## Research that cannot make things up
 
@@ -469,7 +427,7 @@ Two rules the code enforces rather than asks for:
 
 Without a key it runs a **mock provider**: a real page, a real record, a real `paid` state, and no
 money. That is deliberate — a payment step nobody can click through is a payment step nobody has
-debugged, and it is what the fifteen tests in `test_payments.py` run against. With
+exercised. With
 `STRIPE_SECRET_KEY` set it creates real Checkout Sessions instead, and `mark_paid` starts
 refusing outright: there, the processor's webhook is the only thing allowed to say a checkout was
 paid.
@@ -627,85 +585,6 @@ worse than the call it prevented.
 
 ---
 
-## Tests
-
-```bash
-npm test                       # 67 tests — syncing, text editing, the call surface
-pytest                         # 678 tests — research, syncing, the API, the live call, the tools
-```
-
-745 tests in total. None of them load a language model: a test that spends six seconds on
-Qwen to check that a WebSocket sends JSON is testing Qwen.
-
-| Test file | What it protects |
-|---|---|
-| `convergence.test.ts` | Everyone ends up with the same data, whatever order changes arrive in — plus that the order is actually *correct* |
-| `diff.test.ts` | Typing in a shared note produces the right text, including emoji and accents |
-| `test_research.py` | The research agent cannot invent facts, wander onto other websites, or read more pages than allowed |
-| `test_sync.py` | Duplicate changes, saving before broadcasting, slow clients, and TypeScript ↔ Python agreement |
-| `test_app.py` | **The reconnect flush endpoint.** Retry, deduplicate, and never half-apply a batch |
-| `test_pipeline.py` | That a call cannot start without the AI disclosure, that every stage of the turn is measured, and that a price the model invented never reaches the speaker |
-| `test_call.py` | Where a reply is cut for synthesis, what the agent is allowed to claim, and that asking for a human ends the sell without the model being consulted |
-| `test_agenda.py` | That she researches before she greets, that the page she opens is ours and not theirs, that the times she offers come from the calendar and not the model, and that typing over her introduction does not kill the call |
-| `test_payments.py` | That the amount comes from the quote and not the conversation, that nothing above the ceiling goes through without a person, and that there is no parameter anywhere that could carry a card number |
-| `test_mcp.py` | That the calendar cannot sell the same slot twice, that a dead tool server degrades the call instead of ending it, that she will not email anyone who was not on the call, and that the CRM accepts every outcome the agenda can actually produce |
-| `test_admission.py` | Who may start a call once the agent is on a stranger's website, and that every refusal is a sentence rather than a status code |
-| `test_agents.py` | The line between what a customer may configure and what the platform enforces — a tenant who can switch off the AI disclosure is a liability the vendor inherits |
-| `test_lipsync.py` | The spectrogram her mouth is driven by — a mel that is subtly wrong makes her lip-sync confidently to the wrong sounds, which looks like a bad model rather than a bad constant |
-| `test_avatar.py` | That the face admits what it is: synthetic, and not lip-syncing unless a provider is actually doing it |
-| `test_speech.py` | What the voice is handed as opposed to what the screen is shown — that no markdown, abbreviation or URL reaches a synthesiser in a spelling it says wrong |
-| `test_readme.py` | That these counts are the counts. A badge is an image, and nobody proofreads an image |
-
-### The bug the API tests found immediately
-
-`/api/sync/append` — the path a console uses to flush its queued edits — **could not accept a
-request body at all.** Every POST returned:
-
-```json
-422  {"detail":[{"type":"missing","loc":["query","req"],"msg":"Field required"}]}
-```
-
-The request model was declared inside `create_app()`. With `from __future__ import annotations`
-every annotation is a string that FastAPI resolves against the *module's* globals, and a class
-defined in a function body is not in them — so the parameter silently degraded to a query
-parameter.
-
-**It went unnoticed because its failure is silent by design.** The console only reaches for this
-path when the WebSocket is unavailable — *"it works in situations the WebSocket does not (some
-corporate proxies)"* — and a failed flush leaves the ops queued for retry rather than surfacing an
-error, because from the user's point of view the write already succeeded locally. So on exactly
-the networks the fallback exists to serve, nothing ever synced and nobody was told.
-
-The endpoint had no tests. It now has eleven.
-
-### And one it found on the second look
-
-A batch containing one malformed op was rejected with 422 *after* persisting the good ops before
-it. The console retries the whole batch on failure, so the bad op failed forever while the good
-ones deduplicated: the outbox never drained, and still nothing surfaced. Ops are validated in full
-before anything is written now — one poison op rejects its batch rather than half-applying it.
-
-### A bug that convergence testing could not find
-
-The 300 randomised runs check that two devices **agree**. They passed throughout while shared
-notes were quietly scrambling, because both devices agreed on the same wrong answer — and
-agreeing on a wrong answer is still agreeing.
-
-Characters were ordered by comparing their ids as text. Ids look like `alice:6` and `alice:10`,
-and as text `"alice:10"` sorts before `"alice:6"`, because `1` comes before `6`. **So notes
-started scrambling after about ten keystrokes.**
-
-The first attempted fix — read the number properly and compare it numerically — was also wrong,
-and broke the case the first bug was hiding: those numbers count per person, so one person's
-edit number 0 can happen long after another person's edit number 5. Two people typing in the
-same sentence got their words tangled with text that predated them both.
-
-Both are now ordered by timestamp, which is the only value that compares meaningfully across
-people. It took a test that checked **what the text actually said**, rather than that two copies
-matched.
-
----
-
 ## Project layout
 
 ```
@@ -727,7 +606,7 @@ services/api
     client.py          spawns the tool servers, routes calls, enforces deadlines
     servers/           calendar, crm, research, email, payments — each runnable alone
   research/            reading websites and extracting facts
-  sync/                collecting and relaying changes
+  sync/                who may write, relaying changes, and pruning the log
   crm/                 turning changes into a readable view
 ```
 
